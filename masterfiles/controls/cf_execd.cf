@@ -1,0 +1,63 @@
+###############################################################################
+# This part is for cf-execd
+#
+# These body settings determine the behaviour of cf-execd,
+# including scheduling times and output capture to
+# $(sys.workdir)/outputs and relay via email.
+###############################################################################
+
+body executor control
+
+{
+    !policy_server::
+      splaytime  => "2";
+    any::
+      mailto     => "root@$(def.domain)";
+      mailfrom   => "root@$(sys.host).$(def.domain)";
+      smtpserver => "localhost";
+
+      # Default:
+      #
+      # schedule => { "Min00", "Min05", "Min10", "Min15", "Min20",
+      #               "Min25", "Min30", "Min35", "Min40", "Min45",
+      #               "Min50", "Min55" };
+#       schedule => {
+#                     "Min00", "Min01", "Min02", "Min03", "Min04",
+#                     "Min05", "Min06", "Min07", "Min08", "Min09",
+#                     "Min10", "Min11", "Min12", "Min13", "Min14",
+#                     "Min15", "Min16", "Min17", "Min18", "Min19",
+#                     "Min20", "Min21", "Min22", "Min23", "Min24",
+#                     "Min25", "Min26", "Min27", "Min28", "Min29",
+#                     "Min30", "Min31", "Min32", "Min33", "Min34",
+#                     "Min35", "Min36", "Min37", "Min38", "Min39",
+#                     "Min40", "Min41", "Min42", "Min43", "Min44",
+#                     "Min45", "Min46", "Min47", "Min48", "Min49",
+#                     "Min50", "Min51", "Min52", "Min53", "Min54",
+#                     "Min55", "Min56", "Min57", "Min58", "Min59",
+#             };
+
+
+      # The full path and command to the executable run by default (overriding builtin).
+      # cf-twin needs its own safe environment because of the update mechanism
+
+    windows.(cfengine_3_4|cfengine_3_5)::
+      exec_command => "$(sys.cf_twin) -f \"$(sys.workdir)\inputs\update.cf\" & $(sys.cf_agent) -Dcf_execd_initiated";
+    windows.!(cfengine_3_4|cfengine_3_5)::
+      exec_command => "$(sys.cf_twin) -f \"$(sys.update_policy_path)\" & $(sys.cf_agent) -Dcf_execd_initiated";
+
+    hpux.(cfengine_3_4|cfengine_3_5)::
+      exec_command => "SHLIB_PATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.workdir)/inputs/update.cf\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+    hpux.!(cfengine_3_4|cfengine_3_5)::
+      exec_command => "SHLIB_PATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.update_policy_path)\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+
+    aix.(cfengine_3_4|cfengine_3_5)::
+      exec_command => "LIBPATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.workdir)/inputs/update.cf\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+    aix.!(cfengine_3_4|cfengine_3_5)::
+      exec_command => "LIBPATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.update_policy_path)\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+
+    !(windows|hpux|aix).(cfengine_3_4|cfengine_3_5)::
+      exec_command => "LD_LIBRARY_PATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.workdir)/inputs/update.cf\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+    !(windows|hpux|aix).!(cfengine_3_4|cfengine_3_5)::
+      exec_command => "LD_LIBRARY_PATH=\"/var/cfengine/lib-twin\" $(sys.cf_twin) -f \"$(sys.update_policy_path)\" ; $(sys.cf_agent) -Dcf_execd_initiated";
+
+}

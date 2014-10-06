@@ -1,0 +1,17 @@
+#!/bin/bash
+
+cmd="$1"
+
+if [ "$cmd" = "list" ]; then
+    list_result="$2"
+    echo "$list_result"
+    exit 0
+fi
+
+if [ "$cmd" = "success" ]; then
+  exit 0
+fi
+
+if [ "$cmd" = "fail" ]; then
+  exit 1
+fi

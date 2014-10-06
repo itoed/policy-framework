@@ -1,0 +1,313 @@
+# PACKAGE
+#
+
+body file control
+{
+  namespace => "package";
+     inputs => {
+                "$(inputs:lib.packages)",
+                "$(inputs:components.common[class])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"              slist => { "config" };
+
+  vars:
+      "rpm_package_list_command" string => "$(default:rpm_knowledge.call_rpm) -qa --qf '$(default:rpm_knowledge.rpm3_output_format)'",
+        ifvarclass => not(isvariable("rpm_package_list_command"));
+      "rpm_package_list_command" string => "$(info[rpm_package_list_command])",
+        ifvarclass => isvariable("info[rpm_package_list_command]");
+
+      "rpm_package_add_command" string => "$(default:redhat_knowledge.call_yum) $(default:redhat_knowledge.yum_options) -y install",
+        ifvarclass => not(isvariable("rpm_package_add_command"));
+      "rpm_package_add_command" string => "$(info[rpm_package_add_command])",
+        ifvarclass => isvariable("info[rpm_package_add_command]");
+
+      "rpm_package_delete_command" string => "$(default:rpm_knowledge.call_rpm) -e --nodeps",
+        ifvarclass => not(isvariable("rpm_package_delete_command"));
+      "rpm_package_delete_command" string => "$(info[rpm_package_delete_command])",
+        ifvarclass => isvariable("info[rpm_package_delete_command]");
+
+      "rpm_package_list_update_ifelapsed" string => "$(default:common_knowledge.list_update_ifelapsed)",
+        ifvarclass => not(isvariable("rpm_package_list_update_ifelapsed"));
+      "rpm_package_list_update_ifelapsed" string => "$(info[rpm_package_list_update_ifelapsed])",
+        ifvarclass => isvariable("info[rpm_package_list_update_ifelapsed]");
+
+      "rpm_package_list_update_command" string => "$(default:redhat_knowledge.call_yum) $(default:redhat_knowledge.yum_options) check-update $(default:redhat_knowledge.check_update_postproc)",
+        ifvarclass => not(isvariable("rpm_package_list_update_command"));
+      "rpm_package_list_update_command" string => "$(info[rpm_package_list_update_command])",
+        ifvarclass => isvariable("info[rpm_package_list_update_command]");
+
+      "call_gem_list"         string => "/usr/bin/gem list",
+                          ifvarclass => not(isvariable("call_gem_list"));
+      "call_gem_list"         string => "$(info[gem_list])",
+                          ifvarclass => isvariable("info[gem_list]");
+
+      "call_gem_install"      string => concat("/bin/sh -c 'umask 0022; ",
+                                        "gem \"$0\" \"$@\"' install --no-ri --no-rdoc"),
+                          ifvarclass => not(isvariable("call_gem_install"));
+      "call_gem_install"      string => "$(info[gem_install])",
+                          ifvarclass => isvariable("info[gem_install]");
+}
+
+bundle agent yum_addupdate(argsjson)
+{
+  vars:
+      "args"                  data => parsejson('{}');
+      "args"                  data => parsejson("$(argsjson)");
+
+      "pkgname"             string => "$(args[name])",
+                        ifvarclass => isvariable("args[name]");
+
+      "pkgver"              string => "$(args[version])",
+                        ifvarclass => isvariable("args[version]");
+
+      "pkgarch"             string => "$(args[arch])",
+                        ifvarclass => isvariable("args[arch]");
+      "pkgarch"             string => "$(sys.arch)",
+                        ifvarclass => not(isvariable("args[arch]"));
+
+      "id"                  string => canonify("$(pkgname)"),
+                        ifvarclass => isvariable("args[name]");
+      "id"                  string => "$(args[id])",
+                        ifvarclass => isvariable("args[id]");
+
+  classes:
+      "argsjson_error"
+      expression => strcmp("{}", format("%S", "args"));
+
+    !argsjson_error::
+      "name_arg_error"
+             not => isvariable("args[name]");
+
+      "version_arg_error"
+             not => isvariable("args[version]");
+
+      "yum_addupdate_$(id)_error"
+              or => {
+                      "name_arg_error",
+                      "version_arg_error",
+                      "package_error",
+                    },
+           scope => "namespace";
+
+      "yum_addupdate_$(id)_repaired"
+      expression => "package_repaired",
+           scope => "namespace";
+
+      "yum_addupdate_$(id)_kept"
+      expression => "package_kept",
+           scope => "namespace";
+
+      "yum_addupdate_$(id)_ok"
+      expression => "package_ok",
+           scope => "namespace";
+
+  packages:
+      "$(pkgname)"
+        package_version => "$(pkgver)",
+        package_architectures => { "$(pkgarch)" },
+        package_policy => "addupdate",
+        package_method => yum,
+        package_select => "==",
+        classes => class:local("package"),
+        ifvarclass => "!argsjson_error.!yum_addupdate_$(id)_error";
+
+  reports:
+    default:policy_debug_mode::
+      "Package $(pkgname)-$(pkgver) is as promised"
+      ifvarclass => "yum_addupdate_$(id)_kept";
+    default:any::
+      "* Package $(pkgname)-$(pkgver) was installed"
+      ifvarclass => "yum_addupdate_$(id)_repaired";
+      "ERROR: Bundle 'package:yum_addupdate' could not parse arguments '$(argsjson)'"
+      ifvarclass => "argsjson_error";
+      "ERROR: Bundle 'package:yum_addupdate' expected argument 'name'"
+      ifvarclass => "name_arg_error";
+      "ERROR: Bundle 'package:yum_addupdate' expected argument 'version'"
+      ifvarclass => "version_arg_error";
+      "ERROR: Package $(pkgname)-$(pkgver) could not be repaired"
+      ifvarclass => "package_error";
+}
+
+bundle agent yum_delete(argsjson)
+{
+  vars:
+      "args"                  data => parsejson('{}');
+      "args"                  data => parsejson("$(argsjson)");
+
+      "pkgname"             string => "$(args[name])",
+                        ifvarclass => isvariable("args[name]");
+
+      "pkgver"              string => "$(args[version])",
+                        ifvarclass => isvariable("args[version]"),
+                           classes => class:local("pkgver");
+
+      "id"                  string => canonify("$(pkgname)"),
+                        ifvarclass => isvariable("args[name]");
+      "id"                  string => "$(args[id])",
+                        ifvarclass => isvariable("args[id]");
+
+  classes:
+      "argsjson_error" expression => strcmp("{}", format("%S", "args"));
+
+    !argsjson_error::
+      "name_arg_error" not => isvariable("args[name]");
+
+      "yum_delete_$(id)_error"
+        or => {
+                "name_arg_error",
+                "version_arg_error",
+                "package_error",
+              },
+        scope => "namespace";
+
+      "yum_delete_$(id)_repaired"
+        expression => "package_repaired",
+        scope => "namespace";
+
+      "yum_delete_$(id)_kept"
+        expression => "package_kept",
+        scope => "namespace";
+
+      "yum_delete_$(id)_ok"
+        expression => "package_ok",
+        scope => "namespace";
+
+  packages:
+    pkgver_reached::
+      "$(pkgname)"
+        package_version => "$(pkgver)",
+        package_policy => "delete",
+        package_method => yum,
+        package_select => "==",
+        classes => class:local("package"),
+        ifvarclass => "!argsjson_error.!yum_delete_$(id)_error";
+
+    !pkgver_reached::
+      "$(pkgname)"
+        package_policy => "delete",
+        package_method => yum,
+        classes => class:local("package"),
+        ifvarclass => "!argsjson_error.!yum_delete_$(id)_error";
+
+  reports:
+      "- Package $(pkgname) was deleted"
+        ifvarclass => "!pkgver_reached.yum_delete_$(id)_repaired";
+      "- Package $(pkgname)-$(pkgver) was deleted"
+        ifvarclass => "pkgver_reached.yum_delete_$(id)_repaired";
+      "ERROR: Bundle package:yum_delete failed to parse arguments '$(argsjson)'"
+        ifvarclass => "argsjson_error";
+      "ERROR: Bundle package:yum_delete expected argument 'name'"
+        ifvarclass => "name_arg_error";
+      "ERROR: Package $(pkgname) could not be deleted"
+        ifvarclass => "package_error";
+}
+
+bundle agent gem_add(argsjson)
+{
+  vars:
+      "args"                    data => parsejson('{}');
+      "args"                    data => parsejson("$(argsjson)");
+
+      "pkgname"               string => "$(args[name])",
+                          ifvarclass => isvariable("args[name]");
+
+      "pkgver"                string => "$(args[version])",
+                          ifvarclass => isvariable("args[version]");
+
+      "id"                  string => canonify("$(pkgname)"),
+                        ifvarclass => not(isvariable("args[id]")),
+                           classes => class:local("id");
+      "id"                  string => canonify("$(args[id])"),
+                        ifvarclass => isvariable("args[id]"),
+                           classes => class:local("id");
+  classes:
+    id_ok::
+      "name_error" not => isvariable("args[name]");
+      "version_error" not => isvariable("args[version]");
+
+      "gem_add_$(id)_error"
+                or => {
+                        "name_error",
+                        "version_error",
+                        "add_error",
+                      },
+             scope => "namespace";
+
+      "gem_add_$(id)_repaired" expression => "add_repaired", scope => "namespace";
+      "gem_add_$(id)_kept" expression => "add_kept", scope => "namespace";
+      "gem_add_$(id)_ok" expression => "add_ok", scope => "namespace";
+
+  packages:
+    id_ok::
+      "$(pkgname)"
+        package_version => "$(pkgver)",
+         package_policy => "add",
+         package_method => gem,
+         package_select => "==",
+                classes => class:local("add"),
+             ifvarclass => "!gem_add_$(id)_error";
+
+  reports:
+    add_kept.default:policy_debug_mode::
+      "RubyGem $(pkgname)-$(pkgver) is as promised";
+    add_repaired::
+      "* RubyGem $(pkgname)-$(pkgver) was installed";
+    add_error::
+      "ERROR: RubyGem $(pkgname)-$(pkgver) could not be repaired";
+    name_error::
+      "ERROR: gem:gem_add expected argument 'name' for '$(id)'";
+    version_error::
+      "ERROR: gem:gem_add expected argument 'version' for '$(id)'";
+    !id_ok::
+      "ERROR: gem:gem_add failed to parse 'id' from arguments '$(argsjson)'";
+}
+
+body package_method yum
+{
+  package_changes => "individual";
+  package_list_command => "$(config.rpm_package_list_command)";
+  package_patch_list_command => "$(config.rpm_package_list_update_command)";
+
+  package_list_name_regex => "$(default:rpm_knowledge.rpm3_name_regex)";
+  package_list_version_regex => "$(default:rpm_knowledge.rpm3_version_regex)";
+  package_list_arch_regex => "$(default:rpm_knowledge.rpm3_arch_regex)";
+
+  package_installed_regex => ".*";
+  package_name_convention => "$(name)-$(version).$(arch)";
+
+  # just give the package name to rpm to delete, otherwise it gets "name.*" (from package_name_convention above)
+  package_delete_convention => "$(name)";
+
+  # set it to "0" to avoid caching of list during upgrade
+  package_list_update_command => "$(config.rpm_package_list_update_command)";
+  package_list_update_ifelapsed => "$(config.rpm_package_list_update_ifelapsed)";
+
+  package_patch_name_regex => "$(default:redhat_knowledge.patch_name_regex)";
+  package_patch_version_regex => "$(default:redhat_knowledge.patch_version_regex)";
+  package_patch_arch_regex => "$(default:redhat_knowledge.patch_arch_regex)";
+
+  package_add_command => "$(config.rpm_package_add_command)";
+  package_update_command => "$(config.rpm_package_add_command)";
+  package_patch_command  => "$(config.rpm_package_add_command)";
+  package_delete_command => "$(config.rpm_package_delete_command)";
+  package_verify_command => "$(default:rpm_knowledge.call_rpm) -V";
+
+  package_version_less_command => "/var/cfengine/bin/rpmvercmp $(v1) lt $(v2)";
+}
+
+body package_method gem
+{
+  package_changes => "individual";
+  package_list_command => "$(package:config.call_gem_list)";
+  package_list_name_regex => "(\S+).*";
+  package_list_version_regex => "\s+\(([^)]+).*";
+  package_installed_regex => ".*";
+  package_name_convention => "$(name) -v $(version)";
+  package_add_command => "$(package:config.call_gem_install)";
+  package_list_update_ifelapsed => "0";
+}

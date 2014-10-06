@@ -1,0 +1,10 @@
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [1:140]
+{{#ports}}
+-A INPUT -p tcp -m tcp --dport {{portnum}} -j ACCEPT
+{{/ports}}
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+COMMIT

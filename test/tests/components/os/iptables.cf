@@ -1,0 +1,41 @@
+# IPTABLES TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.os[iptables])",
+               };
+}
+
+bundle agent A1_01_validate_noPorts_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"        usebundle => iptables:validate;
+
+      "error"           usebundle => assert_not_class("iptables:validation_ok");
+}
+
+bundle agent A1_02_validate_withPorts_validationClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"            data => parsejson('{
+        "ports": {
+          "80":         { "name": "nginx", "open": "true" }
+        }
+      }');
+
+  methods:
+      "config"          usebundle => iptables:config(@(info));
+      "validate"        usebundle => iptables:validate;
+
+      "validation_ok"   usebundle => assert_class("iptables:validation_ok");
+}

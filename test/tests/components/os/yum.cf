@@ -1,0 +1,65 @@
+# YUM TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.os[yum])",
+               };
+}
+
+bundle agent A1_01_validate_noConfig_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"            usebundle => yum:validate;
+      "validation_not_ok"   usebundle => assert_not_class("yum:validation_ok");
+}
+
+bundle agent A1_02_validate_withConfig_validationClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"            data => parsejson('{
+        "repos": {
+          "name":       "Test Repo",
+          "baseurl":    "http://localhost/testrepo"
+        }
+      }');
+
+  methods:
+      "config"          usebundle => yum:config(@(info));
+      "validate"        usebundle => yum:validate;
+      "validation_ok"   usebundle => assert_class("yum:validation_ok");
+}
+
+bundle agent B1_repoFiles_nameAndBaseUrl_fileCreated
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"            data => parsejson('{
+        "repodir":      "$(knowledge.tmp_dir)",
+        "owner":        "$(knowledge.env_user)",
+        "repos": {
+          "test": {
+            "name":       "Test Repo",
+            "baseurl":    "http://localhost/testrepo"
+          }
+        }
+      }');
+
+  methods:
+      "config"          usebundle => yum:config(@(info));
+      "repo_files"      usebundle => yum:repo_files;
+
+      "assert"          usebundle => assert_file_perms("644",
+                                        "$(knowledge.tmp_dir)/test.repo");
+}

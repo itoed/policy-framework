@@ -1,0 +1,37 @@
+# COMMAND TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[command])",
+               };
+}
+
+bundle agent A1_01_umaskIs022_testFilePermsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  methods:
+    touch_command_reached::
+      "file_perms_match"      usebundle => assert_file_perms("644",
+                                                            "$(knowledge.tmp_dir)/test");
+
+  commands:
+      "/bin/touch $(knowledge.tmp_dir)/test"
+      contain => command:umask("022"),
+      classes => reached("touch_command");
+}
+
+body classes reached(x)
+{
+      promise_kept => { "$(x)_reached" };
+  promise_repaired => { "$(x)_reached" };
+     repair_failed => { "$(x)_reached" };
+     repair_denied => { "$(x)_reached" };
+    repair_timeout => { "$(x)_reached" };
+             scope => "bundle";
+}

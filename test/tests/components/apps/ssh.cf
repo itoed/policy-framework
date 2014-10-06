@@ -1,0 +1,173 @@
+# SSH TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[ssh])",
+               };
+}
+
+bundle agent A1_editUser_twoKnownHosts_knownHostsFileMatches
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "pubkeydir"         string => "$(knowledge.mocks_dir)/public_keys";
+      "host_key1"         string => "$(pubkeydir)/host1/ssh_host_rsa_key.pub.txt";
+      "host_key2"         string => "$(pubkeydir)/host2/ssh_host_rsa_key.pub.txt";
+
+      "expected_contents" string => concat("host1.testhost.local ",
+                                           readfile("$(host_key1)", 4095),
+                                           "$(const.n)",
+                                           "host2.testhost.local ",
+                                           readfile("$(host_key2)", 4095));
+      "actual_file"       string => "$(knowledge.tmp_dir)/.ssh/known_hosts";
+
+      "id"                string => canonify("$(knowledge.env_user)");
+
+  methods:
+      "edit_user"         usebundle => ssh:edit_user('{
+        "sshdir":                   "$(knowledge.tmp_dir)/.ssh",
+        "user":                     "$(knowledge.env_user)",
+        "known_hosts": {
+          "host1.testhost.local":   "$(host_key1)",
+          "host2.testhost.local":   "$(host_key2)"
+        }
+      }');
+
+      "assert"            usebundle => assert_file_contents("$(expected_contents)",
+                                                            "$(actual_file)");
+
+      "ok"                usebundle => assert_class("ssh:edit_user_$(id)_ok");
+      "repaired"          usebundle => assert_class("ssh:edit_user_$(id)_repaired");
+      "not_kept"          usebundle => assert_not_class("ssh:edit_user_$(id)_kept");
+      "not_error"         usebundle => assert_not_class("ssh:edit_user_$(id)_error");
+}
+
+bundle agent A2_editUser_threeAuthorizedKeys_authorizedKeysFileMatches
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "pubkeydir"         string => "$(knowledge.mocks_dir)/public_keys";
+      "user1_keyfile"     string => "$(pubkeydir)/user1/id_rsa.pub.txt";
+      "user2_keyfile"     string => "$(pubkeydir)/user2/id_rsa.pub.txt";
+
+      "expected_contents" string => concat("no-agent-forwarding,no-port-forwarding,",
+                                           "no-X11-forwarding ",
+                                           readfile("$(user2_keyfile)", 4095),
+                                           "$(const.n)",
+                                           readfile("$(user1_keyfile)", 4095));
+      "actual_file"       string => "$(knowledge.tmp_dir)/.ssh/authorized_keys";
+
+      "id"                string => canonify("$(knowledge.env_user)");
+
+  methods:
+      "edit_user"       usebundle => ssh:edit_user('{
+        "sshdir":           "$(knowledge.tmp_dir)/.ssh",
+        "user":             "$(knowledge.env_user)",
+        "authorized_keys": {
+          "user1": {
+            "keyfile":      "$(user1_keyfile)",
+          },
+          "user2": {
+            "keyfile":      "$(user2_keyfile)",
+            "options":      [
+              "no-agent-forwarding",
+              "no-port-forwarding",
+              "no-X11-forwarding"
+            ]
+          }
+        }
+      }');
+
+      "assert"            usebundle => assert_file_contents("$(expected_contents)",
+                                                            "$(actual_file)");
+
+      "ok"                usebundle => assert_class("ssh:edit_user_$(id)_ok");
+      "repaired"          usebundle => assert_class("ssh:edit_user_$(id)_repaired");
+      "not_kept"          usebundle => assert_not_class("ssh:edit_user_$(id)_kept");
+      "not_error"         usebundle => assert_not_class("ssh:edit_user_$(id)_error");
+}
+
+bundle agent A3_01_editUser_newKeypair_keypairFilesCreated
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "user"          string => "$(knowledge.env_user)";
+
+  methods:
+      "edit_user"           usebundle => ssh:edit_user('{
+        "user":             "$(user)",
+        "sshdir":           "$(knowledge.tmp_dir)/.ssh",
+        "keypair": {
+          "private_key":    "$(knowledge.mocks_dir)/keypairs/user1/id_rsa",
+          "public_key":     "$(knowledge.mocks_dir)/keypairs/user1/id_rsa.pub"
+        }
+      }');
+
+      "private_key_perms"   usebundle => assert_file_perms("600",
+                              "$(knowledge.tmp_dir)/.ssh/id_rsa");
+      "public_key_perms"    usebundle => assert_file_perms("644",
+                              "$(knowledge.tmp_dir)/.ssh/id_rsa.pub");
+
+      "repaired"          usebundle => assert_class("ssh:edit_user_$(user)_repaired");
+      "ok"                usebundle => assert_class("ssh:edit_user_$(user)_ok");
+      "not_kept"          usebundle => assert_not_class("ssh:edit_user_$(user)_kept");
+      "not_error"         usebundle => assert_not_class("ssh:edit_user_$(user)_error");
+}
+
+bundle agent A3_02_editUser_existringKeypair_keypairFilesKept
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "user"          string => "$(knowledge.env_user)";
+      "sshdir"        string => "$(knowledge.tmp_dir)/.ssh";
+
+  files:
+      "$(sshdir)/."
+           create => "true",
+            perms => m("700");
+
+      "$(sshdir)/id_rsa"
+        copy_from => local_cp("$(knowledge.mocks_dir)/keypairs/user1/id_rsa"),
+            perms => m("600");
+
+      "$(sshdir)/id_rsa.pub"
+        copy_from => local_cp("$(knowledge.mocks_dir)/keypairs/user1/id_rsa.pub"),
+            perms => m("644");
+
+  methods:
+      "edit_user"           usebundle => ssh:edit_user('{
+        "user":             "$(user)",
+        "sshdir":           "$(sshdir)",
+        "keypair": {
+          "private_key":    "$(knowledge.mocks_dir)/keypairs/user1/id_rsa",
+          "public_key":     "$(knowledge.mocks_dir)/keypairs/user1/id_rsa.pub"
+        }
+      }');
+
+      "kept"          usebundle => assert_class("ssh:edit_user_$(user)_kept");
+      "ok"            usebundle => assert_class("ssh:edit_user_$(user)_ok");
+      "not_repaired"  usebundle => assert_not_class("ssh:edit_user_$(user)_repaired");
+      "not_error"     usebundle => assert_not_class("ssh:edit_user_$(user)_error");
+}
+
+body copy_from local_cp(from)
+{
+  source => "$(from)";
+}
+
+body perms m(mode)
+{
+  mode => "$(mode)";
+}

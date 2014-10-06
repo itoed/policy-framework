@@ -1,0 +1,142 @@
+#!/usr/bin/env python
+
+from lxml import etree
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+
+SHIRO_HASHER_CMD = "fghijk-shiro-hasher"
+SECURITY_XML_PATH = "/usr/local/sonatype-work/nexus/conf/security.xml"
+
+class NexusSecurityXmlHelperException(Exception):
+    """ An exception with a known cause """
+
+class TemplateDataParser(object):
+    PASSWORD_XPATH = '/security/users/user/password[../id/text() = "{0}"]/text()'
+
+    def __init__(self, argsjson, security_xml_path, hasher_command):
+        self.policy_data = None
+        self.security_xml_path = security_xml_path
+        self.security_xml_tree = None
+        self.hasher_command = hasher_command
+
+        if os.path.isfile(security_xml_path):
+            try:
+                self.security_xml_tree = etree.parse(security_xml_path)
+            except IOError as e:
+                raise NexusSecurityXmlHelperException(
+                    "Could not parse Nexus security data -- Invalid " +
+                    "security.xml file " + security_xml_path)
+
+        try:
+            self.policy_data = json.loads(argsjson)
+        except ValueError as e:
+            raise NexusSecurityXmlHelperException(
+                    "Could not parse Nexus security data -- Invalid " +
+                    "JSON argument: " + argsjson)
+
+    def parse(self):
+        if not self._validate():
+            raise NexusSecurityXmlHelperException("Invalid arguments")
+
+        users = []
+        user_role_mappings = []
+        for user_id in self.policy_data.keys():
+            user_data = self.policy_data[user_id]
+
+            password = user_data["password"]
+            current_password_hash = self._find_password_hash(user_id)
+            if self._verify_hash(password, current_password_hash):
+                password_hash = current_password_hash
+            else:
+                password_hash = self._hash_password(password)
+
+            user = {}
+            user["id"] = user_id
+            user["firstName"] = user_data["firstName"]
+            user["lastName"] = user_data["lastName"]
+            user["password"] = password_hash
+            user["status"] = user_data["status"]
+            user["email"] = user_data["email"]
+            users.append(user)
+
+            user_role_mapping = {}
+            user_role_mapping["userId"] = user_id
+            user_role_mapping["source"] = "default"
+            user_role_mapping["roles"] = user_data["roles"]
+            user_role_mappings.append(user_role_mapping)
+
+        template_data = {}
+        template_data["users"] = users
+        template_data["userRoleMappings"] = user_role_mappings
+
+        print "%template_data=" + json.dumps(template_data)
+
+    def _validate(self):
+        is_valid = True
+        for user_id in self.policy_data.keys():
+            user_data = self.policy_data[user_id]
+            is_valid = (is_valid
+                        and "firstName" in user_data
+                        and "lastName" in user_data
+                        and "password" in user_data
+                        and "status" in user_data
+                        and "email" in user_data
+                        and "roles" in user_data)
+        return is_valid
+
+    def _find_password_hash(self, user_id):
+        if not self.security_xml_tree:
+            return None
+        password_results = self.security_xml_tree.xpath(
+                self.PASSWORD_XPATH.format(user_id))
+        if not password_results:
+            return None
+        return password_results[0]
+
+    def _hash_password(self, password):
+        cmdstr = "{0} '{1}'".format(self.hasher_command, password)
+        cmd = shlex.split(cmdstr)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        output = process.communicate()[0]
+        if process.returncode != 0:
+            raise NexusSecurityXmlHelperException(
+                "Could not hash password -- command {0} failed".format(
+                    cmdstr))
+        return output.rstrip()
+
+    def _verify_hash(self, password, password_hash):
+        cmdstr = "{0} '{1}' '{2}'".format(self.hasher_command, password,
+                                        password_hash)
+        cmd = shlex.split(cmdstr)
+        with open(os.devnull, "w") as devnull:
+            exit_value = subprocess.call(cmd, stdout=devnull)
+            return exit_value == 0
+
+class ParseAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser = TemplateDataParser(values, namespace.file,
+                                    namespace.hasher_command)
+        parser.parse()
+
+#
+#   Parse arguments
+#
+parser = argparse.ArgumentParser()
+
+parser.add_argument("user_data", action=ParseAction,
+                    help="JSON string containing users to parse")
+
+parser.add_argument("-c", "--hasher-command", default=SHIRO_HASHER_CMD,
+    help="Command to generate and compare password hashes")
+parser.add_argument("-f", "--file", default=SECURITY_XML_PATH,
+    help="Path to security.xml file")
+
+try:
+    args = parser.parse_args()
+except NexusSecurityXmlHelperException as e:
+    print e
+    exit(1)

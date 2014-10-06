@@ -1,0 +1,37 @@
+body server control
+{
+  denybadclocks         => "false";
+  allowconnects         => { "127.0.0.1" , "::1", @(access_rules.all_ips) };
+  allowallconnects      => { "127.0.0.1" , "::1", @(access_rules.all_ips) };
+  trustkeysfrom         => { "127.0.0.1" , "::1", @(access_rules.all_ips) };
+  allowusers            => { "root" };
+  maxconnections        => "100";
+  cfruncommand          => "$(sys.cf_twin) -f $(sys.update_policy_path); $(sys.cf_agent)";
+  bindtointerface       => "::";
+}
+
+bundle server access_rules
+{
+  vars:
+      "policy_dirs" slist => lsdir("$(sys.masterdir)/policies", "\w.*", "false");
+
+      "ip[$(policy_dirs)]" string => "127.0.0.1";
+
+      "ip_data" data => mergedata("ip", "$(promises.policy_ns):policy_access.ip");
+
+      "ip_indexes" slist => getvalues("ip_data");
+      "all_ips" slist => unique("ip_indexes");
+
+  access:
+      "$(sys.masterdir)/hub"
+      admit => { "127.0.0.1" };
+
+      "$(sys.masterdir)/policies/$(policy_dirs)"
+      admit => { "$(ip_data[$(policy_dirs)])" };
+
+      "$(sys.masterdir)"
+      admit => { @(all_ips) };
+
+      "$(sys.workdir)/modules"
+      admit => { @(all_ips) };
+}

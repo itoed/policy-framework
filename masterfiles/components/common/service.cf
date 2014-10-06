@@ -1,0 +1,167 @@
+# SERVICE
+#
+
+body file control
+{
+  namespace => "service";
+     inputs => {
+                "$(inputs:lib.commands)",
+                "$(inputs:components.common[class])",
+               };
+}
+
+body service_method chkconfig
+{
+  service_bundle => service:chkconfig_bundle("$(this.promiser)",
+                                             "$(this.service_policy)");
+}
+
+#
+#   Based on standard_services bundle of stdlib 3.6
+#
+bundle agent chkconfig_bundle(service, state)
+{
+  vars:
+      "chkconfig"       string => "/sbin/chkconfig";
+      "init_file"       string => "/etc/init.d/$(service)";
+
+  classes:
+      "$(state)_arg"
+      expression => "default:any";
+
+      "state_error"
+             and => { "!start_arg",
+                      "!stop_arg",
+                      "!restart_arg",
+                    };
+
+      "init_file_error"
+             not => fileexists($(init_file));
+
+      "running"
+      expression => returnszero("$(init_file) status > /dev/null", "useshell"),
+      ifvarclass => "!init_file_error";
+
+      "onboot"
+      expression => returnszero("$(chkconfig) $(service)", "noshell");
+
+      "start"
+             and => { "start_arg|restart_arg", "!running" };
+
+      "restart"
+             and => { "restart_arg", "running" };
+
+      "stop"
+             and => { "stop_arg", "running" };
+
+      "disable_onboot"
+             and => { "stop_arg", "onboot" };
+
+      "enable_onboot"
+             and => { "start_arg|restart_arg", "!onboot" };
+
+      "error"
+              or => {
+                      "state_error",
+                      "init_file_error",
+                      "disable_onboot_error",
+                      "enable_onboot_error",
+                      "start_error",
+                      "restart_error",
+                      "stop_error",
+                    };
+
+      "repaired"
+              or => {
+                      "disable_onboot_repaired",
+                      "enable_onboot_repaired",
+                      "start_repaired",
+                      "restart_repaired",
+                      "stop_repaired",
+                    },
+      ifvarclass => "!error";
+
+      "kept"
+             and => {
+                      "!disable_onboot",
+                      "!enable_onboot",
+                      "!start",
+                      "!restart",
+                      "!stop",
+                    },
+      ifvarclass => "!error";
+
+      "ok"
+             and => {
+                      "!disable_onboot|disable_onboot_ok",
+                      "!enable_onboot|enable_onboot_ok",
+                      "!start|start_ok",
+                      "!restart|restart_ok",
+                      "!stop|stop_ok",
+                    };
+
+  commands:
+    disable_onboot::
+      # Turn chkconfig off only if it's turned on
+      "$(chkconfig) $(service) off"
+         contain => default:silent,
+      ifvarclass => "!error",
+         classes => class:local("disable_onboot");
+
+    enable_onboot::
+      # Turn chkconfig on only if it's turned off
+      "$(chkconfig) $(service) on"
+         contain => default:silent,
+      ifvarclass => "!error",
+         classes => class:local("enable_onboot");
+
+    start::
+      "$(init_file) start"
+         contain => default:silent,
+      ifvarclass => "!error",
+         classes => class:local("start");
+
+    restart::
+      "$(init_file) restart"
+         contain => default:silent,
+      ifvarclass => "!error",
+         classes => class:local("restart");
+
+    stop::
+      "$(init_file) stop"
+         contain => default:silent,
+      ifvarclass => "!error",
+         classes => class:local("stop");
+
+    error::
+      "/bin/false"
+      contain => default:silent;
+
+  reports:
+    kept.default:policy_debug_mode::
+      "Service $(service) is as promised";
+    disable_onboot_repaired::
+      "* Turned off chkconfig for service $(service)";
+    enable_onboot_repaired::
+      "* Turned on chkconfig for service $(service)";
+    start_repaired::
+      "* Service $(service) was started";
+    restart_repaired::
+      "* Service $(service) was restarted";
+    stop_repaired::
+      "* Service $(service) was stopped";
+    state_error::
+      "ERROR: Unexpected state for service $(service): $(state)";
+    init_file_error::
+      "ERROR: Expected init script for service $(service)";
+    disable_onboot_error::
+      "ERROR: Could not turn off chkconfig for service $(service)";
+    enable_onboot_error::
+      "ERROR: Could not turn on chkconfig for service $(service)";
+    start_error::
+      "ERROR: Service $(service) could not be started";
+    restart_error::
+      "ERROR: Service $(service) could not be restarted";
+    stop_error::
+      "ERROR: Service $(service) could not be stopped";
+}

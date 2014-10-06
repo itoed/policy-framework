@@ -1,0 +1,72 @@
+# SWAP TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.os[swap])",
+               };
+}
+
+bundle agent A1_01_config_missingPath_classValidationOkNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"                data => parsejson('{
+        "swaps": {
+          "testswap": {
+            "length":       "1024M"
+          }
+        }
+      }');
+
+  methods:
+      "config"              usebundle => swap:config(@(info));
+      "validate"            usebundle => swap:validate;
+      "validation_not_ok"   usebundle => assert_not_class("swap:validation_ok");
+}
+
+bundle agent A1_02_config_missingLength_classValidationOkNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"                data => parsejson('{
+        "swaps": {
+          "testswap": {
+            "path":       "/tmp/testswap"
+          }
+        }
+      }');
+
+  methods:
+      "config"              usebundle => swap:config(@(info));
+      "validate"            usebundle => swap:validate;
+      "validation_not_ok"   usebundle => assert_not_class("swap:validation_ok");
+}
+
+bundle agent A1_03_config_withValidConfig_classValidationOkNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"                data => parsejson('{
+        "swaps": {
+          "testswap": {
+            "path":       "/tmp/testswap",
+            "length":     "1024M"
+          }
+        }
+      }');
+
+  methods:
+      "config"              usebundle => swap:config(@(info));
+      "validate"            usebundle => swap:validate;
+      "validation_not_ok"   usebundle => assert_class("swap:validation_ok");
+}

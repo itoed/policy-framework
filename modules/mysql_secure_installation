@@ -1,0 +1,346 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+from contextlib import closing
+from tempfile import TemporaryFile
+from tempfile import NamedTemporaryFile
+from mysql.connector import connect
+from mysql.connector import errorcode
+from traceback import print_exc
+
+import grp
+import json
+import mysql.connector
+import os
+import pwd
+import shlex
+import subprocess
+import sys
+import time
+
+STATUS_RUNNING = 0
+STATUS_DEAD_PID_FILE_EXISTS = 1
+STATUS_DEAD_SUBSYS_LOCKED = 2
+STATUS_STOPPED = 3
+STATUS_UNKNOWN = 4
+
+MYSQL_HOME = "/var/lib/mysql"
+PASSWD_FILE = "/var/lib/mysql/rootpasswd"
+PID_FILE = "/var/run/mysqld/mysqld.pid"
+
+MYSQLD_START_TIMEOUT = 10
+
+outlog = TemporaryFile()
+errlog = TemporaryFile()
+
+class ArgumentError(Exception):
+    pass
+
+class TimeoutError(Exception):
+    pass
+
+def mysqld_status():
+    return subprocess.call(
+        shlex.split("service mysqld status"),
+        stdout=outlog,
+        stderr=errlog)
+
+def mysqld_start():
+    print("Starting MySQL service", file=outlog)
+    return subprocess.call(
+        shlex.split("service mysqld start"),
+        stdout=outlog,
+        stderr=errlog)
+
+def mysqld_stop():
+    print("Stopping MySQL service", file=outlog)
+    return subprocess.call(
+        shlex.split("service mysqld stop"),
+        stdout=outlog,
+        stderr=errlog)
+
+def mysqld_restart():
+    mysqld_stop()
+    mysqld_start()
+
+def mysqld_start_with_init_file(init_file):
+    print("Starting mysqld with init-file", file=outlog)
+    process = subprocess.Popen(
+        shlex.split("mysqld_safe --init-file={0} --pid-file={1}".format(
+            init_file, PID_FILE)),
+        stdout=outlog,
+        stderr=errlog)
+
+    start_time = time.time()
+    while mysqld_status() != STATUS_RUNNING:
+        if time.time() - start_time > MYSQLD_START_TIMEOUT:
+            raise TimeoutError(("Timeout waiting for MySQL server "
+                                "to start with init file"))
+        print("Waiting...", file=outlog)
+        time.sleep(0.1)
+
+    print("Started mysqld with init-file", file=outlog)
+
+root_password_kept = False
+root_password_set = False
+root_password_reset = False
+root_password_hard_reset = False
+
+remote_root_users_kept = False
+remote_root_users_repaired = False
+
+anonymous_users_kept = False
+anonymous_users_repaired = False
+
+test_database_kept = False
+test_database_repaired = False
+
+test_database_privileges_kept = False
+test_database_privileges_repaired = False
+
+try:
+    #
+    #   Parse arguments
+    #
+    if len(sys.argv) != 2:
+        raise ArgumentError(
+            ("Module mysql_secure_installation must be invoked "
+             "with exactly one argument: MySQL server root password"))
+
+    password = sys.argv[1]
+
+    if mysqld_status() == STATUS_STOPPED:
+        mysqld_start()
+
+    #
+    #   Promise root password
+    #
+    try:
+        #
+        #   Attempt to connect with given password
+        #
+        with closing(connect(user="root", password=password)) as cnx:
+            root_password_kept = True
+    except mysql.connector.Error as e:
+        if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            #
+            #   Attempt to connect without password
+            #
+            try:
+                with closing(connect(user="root")) as cnx:
+                    with closing(cnx.cursor()) as cursor:
+                        #
+                        #   Set root password
+                        #
+                        cursor.execute(
+                            ("UPDATE mysql.user SET Password=PASSWORD(%s) "
+                             "WHERE User=%s"),
+                            (password, "root"))
+                        cursor.execute("FLUSH PRIVILEGES")
+                        cnx.commit()
+                        root_password_set = True
+            except mysql.connector.Error as e:
+                if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+                    #
+                    #   Attempt to connect with saved password
+                    #
+                    try:
+                        saved_password = None
+                        if os.path.isfile(PASSWD_FILE):
+                            with open(PASSWD_FILE) as f:
+                                saved_password = f.read().rstrip()
+                        with closing(connect(
+                                user="root",
+                                password=saved_password)) as cnx:
+                            with closing(cnx.cursor()) as cursor:
+                                #
+                                #   Reset root password
+                                #
+                                cursor.execute(
+                                    ("UPDATE mysql.user "
+                                     "SET Password=PASSWORD(%s) "
+                                     "WHERE User=%s"),
+                                    (password, "root"))
+                                cursor.execute("FLUSH PRIVILEGES")
+                                cnx.commit()
+                                root_password_reset = True
+                    except mysql.connector.Error as e:
+                        if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+                            #
+                            #   Restart MySQL with password in init file
+                            #
+                            mysqld_stop()
+                            with NamedTemporaryFile(
+                                    dir=MYSQL_HOME) as init_file:
+                                os.chown(
+                                    init_file.name,
+                                    pwd.getpwnam("mysql").pw_uid,
+                                    grp.getgrnam("mysql").gr_gid)
+                                print(
+                                    ("UPDATE mysql.user "
+                                     "SET Password=PASSWORD('{0}') "
+                                     "WHERE User='root';\nFLUSH PRIVILEGES"
+                                    ).format(password),
+                                    file=init_file)
+                                init_file.flush()
+
+                                mysqld_start_with_init_file(init_file.name)
+                                mysqld_restart()
+
+                                with closing(connect(
+                                        user="root",
+                                        password=password)) as cnx:
+                                    root_password_hard_reset = True
+
+    with closing(connect(user="root", password=password)) as cnx:
+        with closing(cnx.cursor()) as cursor:
+            #
+            #   Promise there are no remote root users
+            #
+            try:
+                cursor.execute(
+                    ("SELECT COUNT(*) FROM mysql.user WHERE User='root' "
+                     "AND Host NOT IN ('localhost', '127.0.0.1', '::1')"))
+                remote_root_count, = cursor.fetchone()
+
+                if not remote_root_count:
+                    remote_root_users_kept = True
+                else:
+                    cursor.execute(
+                        ("DELETE FROM mysql.user WHERE User='root' "
+                        "AND Host NOT IN ('localhost', '127.0.0.1', '::1')"))
+                    cnx.commit()
+                    remote_root_users_repaired = True
+            except Exception as e:
+                print("Remote root users could not be deleted", file=errlog)
+                print_exc(file=errlog)
+
+            #
+            #   Promise there are no anonymous users
+            #
+            try:
+                cursor.execute("SELECT COUNT(*) FROM mysql.user WHERE User=''")
+                anon_count, = cursor.fetchone()
+
+                if not anon_count:
+                    anonymous_users_kept = True
+                else:
+                    cursor.execute("DELETE FROM mysql.user WHERE User=''")
+                    cnx.commit()
+                    anonymous_users_repaired = True
+            except Exception as e:
+                print("Anonymous root users could not be deleted", file=errlog)
+                print_exc(file=errlog)
+
+            #
+            #   Promise there is no test database
+            #
+            try:
+                cursor.execute(
+                    ("SELECT COUNT(*) FROM information_schema.SCHEMATA "
+                     "WHERE SCHEMA_NAME='test'"))
+                test_database_count, = cursor.fetchone()
+
+                if not test_database_count:
+                    test_database_kept = True
+                else:
+                    cursor.execute("DROP DATABASE test")
+                    cnx.commit()
+                    test_database_repaired = True
+            except Exception as e:
+                print("Test database could not be deleted", file=errlog)
+                print_exc(file=errlog)
+
+            #
+            #   Promise there are no test database privileges
+            #
+            try:
+                cursor.execute(
+                    ("SELECT COUNT(*) FROM mysql.db "
+                     "WHERE Db=%s OR Db=%s"), ("test", "test\_%"))
+                test_priv_count, = cursor.fetchone()
+
+                if not test_priv_count:
+                    test_database_privileges_kept = True
+                else:
+                    cursor.execute(
+                        ("DELETE FROM mysql.db "
+                         "WHERE Db=%s OR Db=%s"), ("test", "test\_%"))
+                    cnx.commit()
+                    test_database_privileges_repaired = True
+            except Exception as e:
+                print("Test database privileges could not be deleted",
+                    file=errlog)
+                print_exc(file=errlog)
+except ArgumentError as e:
+    print(e, file=errlog)
+except TimeoutError as e:
+    print(e, file=errlog)
+except Exception as e:
+    print_exc(file=errlog)
+
+outlog.seek(0)
+errlog.seek(0)
+
+root_password_repaired = (root_password_set or
+                          root_password_reset or
+                          root_password_hard_reset)
+
+root_password_ok = root_password_kept or root_password_repaired
+remote_root_users_ok = remote_root_users_kept or remote_root_users_repaired
+anonymous_users_ok = anonymous_users_kept or anonymous_users_repaired
+test_database_ok = test_database_kept or test_database_repaired
+test_database_privileges_ok = (test_database_privileges_kept or
+                               test_database_privileges_repaired)
+
+secure_installation_ok = (root_password_ok and
+                          remote_root_users_ok and
+                          anonymous_users_ok and
+                          test_database_ok and
+                          test_database_privileges_ok)
+
+secure_installation_kept = (root_password_kept and
+                            remote_root_users_kept and
+                            anonymous_users_kept and
+                            test_database_kept and
+                            test_database_privileges_kept)
+
+secure_installation_repaired = (secure_installation_ok and
+                                not secure_installation_kept)
+
+kept_promises = []
+if root_password_kept:
+    kept_promises.append("Root password is as promised")
+if remote_root_users_kept:
+    kept_promises.append("Remote root users are as promised")
+if anonymous_users_kept:
+    kept_promises.append("Anonymous users are as promised")
+if test_database_kept:
+    kept_promises.append("Test database is as promised")
+if test_database_privileges_kept:
+    kept_promises.append("Test database privileges are as promised")
+if kept_promises:
+    print("%kept_promises=", json.dumps(kept_promises))
+
+repairs = []
+if root_password_hard_reset:
+    repairs.append("Root password was reset with a restart of MySQL server")
+elif root_password_reset:
+    repairs.append("Root password was reset")
+elif root_password_reset:
+    repairs.append("Root password did not exist and was set")
+if repairs:
+    print("%repairs=" + json.dumps(repairs))
+
+errors = errlog.read()
+if errors:
+    print("%errors=" + json.dumps([ errors.rstrip() ]))
+
+if secure_installation_kept:
+    print("+secure_installation_ok")
+    print("+secure_installation_kept")
+elif secure_installation_repaired:
+    print("+secure_installation_repaired")
+    print("+secure_installation_ok")
+else:
+    print("+secure_installation_error")

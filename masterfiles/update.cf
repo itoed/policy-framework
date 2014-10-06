@@ -1,0 +1,141 @@
+# UPDATE
+#
+
+body common control
+{
+  bundlesequence => { "cfe_internal_update" };
+}
+
+bundle agent cfe_internal_update
+{
+  methods:
+    policy_server::
+      "git_update" usebundle => git_update;
+    any::
+      "file_update" usebundle => file_update;
+
+# processes:
+#     "$(sys.bindir)/cf-serverd"
+#     restart_class => "restart_cf_serverd";
+
+# commands:
+#     "$(sys.cf_serverd)"
+#     ifvarclass => "restart_cf_serverd";
+}
+
+bundle agent file_update
+{
+  files:
+      "/var/cfengine/inputs"
+        copy_from  => u_rcp("/var/cfengine/masterfiles", "$(sys.policy_hub)"),
+        depth_search => u_recurse("inf"),
+        file_select => u_input_files,
+        action => u_immediate;
+
+      "/var/cfengine/modules"
+        copy_from => u_rcp("/var/cfengine/modules", "$(sys.policy_hub)"),
+        depth_search => u_recurse("inf"),
+        file_select => u_module_files,
+        action => u_immediate,
+        perms => u_mog("700", "root", "root");
+}
+
+bundle agent git_update
+{
+  vars:
+      "script"          string => '
+branch=`git symbolic-ref --short -q HEAD`
+if [ "$?" -ne 0 ]; then
+  exit 1
+fi
+
+git remote update
+local=`git rev-parse $branch`
+remote=`git rev-parse origin/$branch`
+if [ $local = $remote ]; then
+    echo +up_to_date
+else
+    echo +pull_required
+fi';
+
+  classes:
+      "has_repository" expression => isdir("/root/fghijk.net");
+
+  commands:
+    has_repository::
+      "/bin/sh -c '$(script)'"
+        module => "true",
+        contain => u_in_dir_silent("/var/cfengine"),
+        classes => u_local("exec_git_rev_parse");
+
+    pull_required::
+      "/usr/bin/git pull"
+        contain => u_in_dir_silent("/var/cfengine"),
+        classes => u_local("exec_git_pull");
+
+  reports:
+    up_to_date.policy_debug_mode::
+      "Git repository '/var/cfengine' is up to date";
+    exec_git_pull_repaired::
+      "Git repository '/var/cfengine' was updated";
+    exec_git_rev_parse_error::
+      "ERROR: Failed to execute git rev-parse";
+    exec_git_pull::
+      "ERROR: Failed to execute git pull";
+}
+
+body copy_from u_rcp(from,server)
+{
+  source => "$(from)";
+  compare => "digest";
+  trustkey => "false";
+  purge => "true";
+!policy_server::
+  servers => { "$(server)" };
+}
+
+body depth_search u_recurse(d)
+{
+  depth => "$(d)";
+  exclude_dirs => { "\.svn", "\.git", "\.hg", "\.bzr" };
+}
+
+body file_select u_input_files
+{
+  leaf_name => { ".*.cf",".*.dat",".*.txt", ".*.vim", ".*.xml", ".*.conf", ".*.yml" };
+  file_result => "leaf_name";
+}
+
+body file_select u_module_files
+{
+  leaf_name => { ".*" };
+  file_result => "leaf_name";
+}
+
+body action u_immediate
+{
+  ifelapsed => "0";
+}
+
+body perms u_mog(mode, user, group)
+{
+  owners => { "$(user)" };
+  groups => { "$(group)" };
+  mode => "$(mode)";
+}
+
+body contain u_in_dir_silent(dir)
+{
+  chdir => "$(dir)";
+  no_output => "true";
+}
+
+body classes u_local(x)
+{
+  promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+  repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+  repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+  repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+  scope => "bundle";
+}

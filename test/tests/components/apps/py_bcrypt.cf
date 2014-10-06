@@ -1,0 +1,37 @@
+# PYTHON BCRYPT TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[py_bcrypt])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => py_bcrypt:validate;
+      "ok"                usebundle => assert_not_class("py_bcrypt:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  methods:
+      "config"            usebundle => py_bcrypt:config(@(info));
+      "validate"          usebundle => py_bcrypt:validate;
+      "validation_ok"     usebundle => assert_class("py_bcrypt:validation_ok");
+}

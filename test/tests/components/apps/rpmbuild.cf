@@ -1,0 +1,37 @@
+# RPMBUILD TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[rpmbuild])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => rpmbuild:validate;
+      "ok"                usebundle => assert_not_class("rpmbuild:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  methods:
+      "config"            usebundle => rpmbuild:config(@(info));
+      "validate"          usebundle => rpmbuild:validate;
+      "validation_ok"     usebundle => assert_class("rpmbuild:validation_ok");
+}

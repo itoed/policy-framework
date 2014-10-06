@@ -1,0 +1,181 @@
+# SWAP
+#
+
+body file control
+{
+  namespace => "swap";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+# "info": {
+#   "bigswap": {
+#     "path":         "/bigswap",
+#     "length":         "1024",
+#   }
+# }
+bundle agent config(info)
+{
+  meta:
+      "tags"            slist => { "config" };
+
+  vars:
+      "swaps"                   data => mergedata("info[swaps]"),
+                          ifvarclass => isvariable("info[swaps]");
+
+      "swap_creator_module"   string => "$(inputs:dirs.moduledir)/swap_creator";
+
+      "fstab_file"            string => "/etc/fstab";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"            slist => { "validation" };
+
+  vars:
+      "swaps"           data => mergedata("swap:config.swaps");
+      "s"              slist => getindices("swaps");
+
+  classes:
+      "path_error_$(s)"
+             not => isvariable("swaps[$(s)][path]");
+
+      "path_error"
+      expression => "path_error_$(s)";
+
+      "length_error_$(s)"
+             not => isvariable("swaps[$(s)][length]");
+
+      "length_error"
+      expression => "length_error_$(s)";
+
+      "validation_ok"
+         and => { "!path_error",
+                  "!length_error",
+                },
+       scope => "namespace";
+
+  reports:
+      "ERROR: Expected field 'path' for swap '$(s)'"
+      ifvarclass => "path_error_$(s)";
+
+      "ERROR: Expected field 'length' for swap '$(s)'"
+      ifvarclass => "length_error_$(s)";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"            slist => { "control" };
+
+  methods:
+      "swap_files"      usebundle => swap_files;
+      "fstab_file"      usebundle => fstab_file;
+}
+
+bundle agent swap_files
+{
+  vars:
+      "swaps"                   data => mergedata("swap:config.swaps");
+      "id"                     slist => getindices("swaps");
+
+  methods:
+      "make_swap_$(s)"   usebundle => swap_file("$(id)",
+                                                "$(swaps[$(id)][path])",
+                                                "$(swaps[$(id)][length])");
+}
+
+#
+# NOTE: This bundle does not verify that the swap file has the correct
+# length allocated (as per fallocate), the correct format (as per mkswap),
+# nor that it is active (as per swapon).
+#
+bundle agent swap_file(id, path, length)
+{
+  vars:
+      "creator_module"      string => "$(config.swap_creator_module)";
+
+  classes:
+      "swap_exists"
+      expression => fileexists("$(path)");
+
+      "swap_$(id)_error"
+              or => { "invoke_module_error",
+                      "swap_creator_$(id)_error",
+                      "$(edit_file[error])",
+                    },
+           scope => "namespace";
+
+      "swap_$(id)_repaired"
+              or => { "swap_creator_$(id)_repaired",
+                      "$(edit_file[repaired])",
+                    },
+      ifvarclass => "!swap_$(id)_error",
+           scope => "namespace";
+
+      "swap_$(id)_ok"
+      expression => "$(edit_file[ok])",
+      ifvarclass => "!swap_$(id)_error",
+           scope => "namespace";
+
+  methods:
+    swap_exists::
+      "edit_file"         usebundle => file:edit_file('{
+        "path":           "$(path)",
+      }'),                useresult => "edit_file";
+
+  commands:
+      "$(creator_module) $(id) $(path) $(length)"
+          module => "true",
+      ifvarclass => "!swap_exists",
+         classes => class:local("invoke_module");
+
+  reports:
+      "* Swap file '$(path)' ($(length)) was repaired"
+      ifvarclass => "swap_creator_$(id)_repaired";
+
+      "ERROR: Swap file '$(path)' ($(length)) could not be repaired"
+      ifvarclass => "swap_creator_$(id)_error";
+
+      "ERROR: $(default:swap_creator.errors)"
+      ifvarclass => isvariable("default:swap_creator.errors");
+}
+
+bundle agent fstab_file
+{
+  vars:
+      "swaps"                   data => mergedata("swap:config.swaps");
+      "id"                     slist => getindices("swaps");
+      "swapline[$(id)]"       string => "$(swaps[$(id)][path]) swap swap defaults 0 0";
+      "lines"                  slist => getvalues("swapline");
+      "linedata"                data => mergedata("lines");
+
+      "file_argsjson"         string => format('{
+        "path":               "$(config.fstab_file)",
+        "extra_contents":     %S
+      }', "linedata");
+
+  classes:
+      "fstab_file_error"
+      expression => "$(edit_file[error])",
+           scope => "namespace";
+
+      "fstab_file_kept"
+      expression => "$(edit_file[kept])",
+           scope => "namespace";
+
+      "fstab_file_repaired"
+      expression => "$(edit_file[repaired])",
+           scope => "namespace";
+
+      "fstab_file_ok"
+      expression => "$(edit_file[ok])",
+           scope => "namespace";
+
+  methods:
+      "edit_file"           usebundle => file:edit_file("$(file_argsjson)"),
+                            useresult => "edit_file";
+}

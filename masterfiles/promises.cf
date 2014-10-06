@@ -1,0 +1,18 @@
+# PROMISES
+#
+
+body common control
+{
+  inputs => {
+              "controls/cf_execd.cf",
+              "policies/$(sys.fqhost)/policy.cf",
+            };
+  bundlesequence  => { "$(promises.main_bundle)" };
+}
+
+bundle common promises
+{
+  vars:
+      "policy_ns" string => canonify("$(sys.fqhost)");
+      "main_bundle" string => "$(policy_ns):main";
+}

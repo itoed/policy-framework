@@ -1,0 +1,394 @@
+# NGINX
+#
+
+body file control
+{
+  namespace => "nginx";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+                "$(inputs:components.common[service])",
+                "$(inputs:components.common[user])",
+                "$(inputs:components.os[hosts])",
+                "$(inputs:components.os[iptables])",
+                "$(inputs:components.os[network])",
+                "$(inputs:components.os[yum])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+                                "network",
+                                "hosts",
+                                "iptables",
+                                "yum",
+                               }, meta => { "dependencies" };
+
+      "owner"               string => "root";
+      "homedir"             string => "/etc/nginx";
+
+      "nginx_conf_file"     string => "$(homedir)/nginx.conf";
+      "sites_available_dir" string => "$(homedir)/sites-available";
+      "sites_enabled_dir"   string => "$(homedir)/sites-enabled";
+
+      "templatedir"         string => "$(inputs:dirs.templatedir)/daemons/nginx";
+      "nginx_conf_template" string => "$(templatedir)/nginx.conf.txt";
+
+      "sites"                 data => parsejson('{
+        "default": {
+          "server_name":      "localhost",
+          "template":         "$(templatedir)/default.conf.txt",
+          "template_data": {
+          }
+        }
+      }');
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"               slist => { "config" };
+
+  vars:
+      "version"               string => "$(info[version])",
+                          ifvarclass => isvariable("info[version]");
+
+      "groups_secondary"        data => parsejson('[]'),
+                          ifvarclass => not(isvariable("groups_secondary"));
+      "groups_secondary"        data => mergedata("info[groups_secondary]"),
+                          ifvarclass => isvariable("info[groups_secondary]");
+
+      "owner"                 string => "$(knowledge.owner)",
+                          ifvarclass => not(isvariable("owner"));
+      "owner"                 string => "$(info[owner])",
+                          ifvarclass => isvariable("info[owner]");
+
+      "homedir"               string => "$(knowledge.homedir)",
+                          ifvarclass => not(isvariable("homedir"));
+      "homedir"               string => "$(info[homedir])",
+                          ifvarclass => isvariable("info[homedir]");
+
+      "nginx_conf_file"       string => "$(knowledge.nginx_conf_file)",
+                          ifvarclass => not(isvariable("nginx_conf_file"));
+      "nginx_conf_file"       string => "$(info[nginx_conf_file])",
+                          ifvarclass => isvariable("info[nginx_conf_file]");
+
+      "nginx_conf_template"   string => "$(knowledge.nginx_conf_template)",
+                          ifvarclass => not(isvariable("nginx_conf_template"));
+      "nginx_conf_template"   string => "$(info[nginx_conf_template])",
+                          ifvarclass => isvariable("info[nginx_conf_template]");
+
+      "sites_available_dir"   string => "$(knowledge.sites_available_dir)",
+                          ifvarclass => not(isvariable("sites_available_dir"));
+      "sites_available_dir"   string => "$(info[sites_available_dir])",
+                          ifvarclass => isvariable("info[sites_available_dir]");
+
+      "sites_enabled_dir"     string => "$(knowledge.sites_enabled_dir)",
+                          ifvarclass => not(isvariable("sites_enabled_dir"));
+      "sites_enabled_dir"     string => "$(info[sites_enabled_dir])",
+                          ifvarclass => isvariable("info[sites_enabled_dir]");
+
+      "sites"                   data => mergedata("nginx:knowledge.sites"),
+                          ifvarclass => not(isvariable("sites"));
+      "sites"                   data => mergedata("sites", "info[sites]"),
+                          ifvarclass => isvariable("info[sites]");
+
+      "user"                    data => parsejson('{}'),
+                          ifvarclass => not(isvariable("user"));
+      "user"                    data => mergedata("user", "info[user]"),
+                          ifvarclass => isvariable("info[user]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"     slist => { "validation" };
+
+  vars:
+      "sites"     data => mergedata("nginx:config.sites");
+      "s"        slist => getindices("nginx:config.sites");
+
+  classes:
+      "version_error"            not => isvariable("nginx:config.version");
+
+      "certificate_source_error_$(s)"
+             not => isvariable("sites[$(s)][certificate][source]"),
+      ifvarclass => isvariable("sites[$(s)][certificate]");
+
+      "certificate_source_error"
+      expression => "certificate_source_error_$(s)";
+
+      "certificate_key_source_error_$(s)"
+             not => isvariable("sites[$(s)][certificate][key_source]"),
+      ifvarclass => isvariable("sites[$(s)][certificate]");
+
+      "certificate_key_source_error"
+      expression => "certificate_key_source_error_$(s)";
+
+      "validation_ok"
+             and => {
+                      "!version_error",
+                      "!certificate_source_error",
+                      "!certificate_key_source_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Nginx field 'version' is missing";
+
+    default:any::
+      "ERROR: Site $(s) is missing certificate source field"
+      ifvarclass => "certificate_source_error_$(s)";
+
+      "ERROR: Site $(s) is missing certificate key source field"
+      ifvarclass => "certificate_key_source_error_$(s)";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"               slist => { "control" };
+
+  classes:
+      "error" expression => "class:batch_nginx_error", scope => "namespace";
+      "repaired" expression => "class:batch_nginx_repaired", scope => "namespace";
+      "kept" expression => "class:batch_nginx_kept", scope => "namespace";
+      "ok" expression => "class:batch_nginx_ok", scope => "namespace";
+
+  methods:
+      "package" usebundle => package:yum_addupdate('{
+        "name": "nginx",
+        "version": "$(config.version)"
+      }');
+    package:yum_addupdate_nginx_ok::
+      "homedir" usebundle => homedir;
+    homedir_ok::
+      "nginx_user" usebundle => nginx_user;
+    nginx_user_ok::
+      "service" usebundle => service;
+    default:any::
+      "pre_service_batch" usebundle => class:batch("nginx_pre_service", '[
+        "package:yum_addupdate_nginx",
+        "nginx:homedir",
+        "nginx:user",
+      ]');
+    class:batch_nginx_pre_service_ok::
+      "service" usebundle => service;
+    default:any::
+      "batch" usebundle => class:batch("nginx", '[
+        "class:batch_nginx_pre_service",
+        "nginx:service",
+      ]');
+
+  reports:
+    kept.default:policy_debug_mode::
+      "Nginx is as promised";
+    repaired::
+      "* Nginx was repaired";
+    error::
+      "ERROR: Nginx could not be repaired";
+}
+
+bundle agent homedir
+{
+  classes:
+      "homedir_error" expression => "class:batch_nginx_homedir_error", scope => "namespace";
+      "homedir_repaired" expression => "class:batch_nginx_homedir_repaired", scope => "namespace";
+      "homedir_kept" expression => "class:batch_nginx_homedir_kept", scope => "namespace";
+      "homedir_ok" expression => "class:batch_nginx_homedir_ok", scope => "namespace";
+
+  methods:
+      "homedir" usebundle => file:edit_dir('{
+        "id": "nginx_homedir",
+        "path": "$(config.homedir)",
+        "owner": "$(config.owner)"
+      }');
+
+      "nginx_conf_file" usebundle => file:copy_file('{
+        "id": "nginx_conf_file",
+        "path": "$(config.nginx_conf_file)",
+        "owner": "$(config.owner)",
+        "mode": "644",
+        "source": "$(config.nginx_conf_template)"
+      }');
+
+      "sites_available_dir" usebundle => file:edit_dir('{
+        "id": "nginx_sites_available_dir",
+        "path": "$(config.sites_available_dir)",
+        "owner": "$(config.owner)",
+        "create": "true"
+      }');
+
+      "sites_enabled_dir" usebundle => file:edit_dir('{
+        "id": "nginx_sites_enabled_dir",
+        "path": "$(config.sites_enabled_dir)",
+        "owner": "$(config.owner)",
+        "create": "true"
+      }');
+
+      "sites" usebundle => sites;
+
+      "batch" usebundle => class:batch("nginx_homedir", '[
+        "file:edit_dir_nginx_homedir",
+        "file:copy_file_nginx_conf_file",
+        "file:edit_dir_nginx_sites_available_dir",
+        "file:edit_dir_nginx_sites_enabled_dir",
+        "nginx:sites",
+      ]');
+}
+
+bundle agent sites
+{
+  vars:
+      "sites" data => mergedata("nginx:config.sites");
+      "s" slist => getindices("sites");
+      "site_classes" slist => maplist('"nginx:site_$(this)"', "s");
+      "site_classes_json" string => format('[ %s ]', join(", ", "site_classes"));
+
+  classes:
+      "sites_error" expression => "class:batch_nginx_sites_error", scope => "namespace";
+      "sites_repaired" expression => "class:batch_nginx_sites_repaired", scope => "namespace";
+      "sites_kept" expression => "class:batch_nginx_sites_kept", scope => "namespace";
+      "sites_ok" expression => "class:batch_nginx_sites_ok", scope => "namespace";
+
+  methods:
+      "site_$(s)" usebundle => site("$(s)");
+      "batch" usebundle => class:batch("nginx_sites", "$(site_classes_json)");
+}
+
+bundle agent site(s)
+{
+  vars:
+      "site" data => mergedata("nginx:config.sites[$(s)]"),
+        classes => class:local("site");
+      "template" string => "$(site[template])",
+        classes => class:local("template"),
+        ifvarclass => isvariable("site[template]");
+      "template_data" string => '{}',
+        ifvarclass => not(isvariable("site[template_data]")),
+        classes => class:local("template_data");
+      "template_data" string => format("%S", "site[template_data]"),
+        ifvarclass => isvariable("site[template_data]"),
+        classes => class:local("template_data");
+      "cert" data => mergedata("site[certificate]"),
+        classes => class:local("cert");
+      "cert_source" string => "$(site[certificate][source])",
+        classes => class:local("cert_source"),
+        ifvarclass => isvariable("site[certificate][source]");
+      "cert_key_source" string => "$(site[certificate][key_source])",
+        classes => class:local("cert_key_source"),
+        ifvarclass => isvariable("site[certificate][key_source]");
+
+      "batch_classes" string => format('[
+        "file:edit_file_nginx_site_available_$(s)",
+        "file:edit_link_nginx_site_enabled_$(s)",
+        %s
+      ]', ifelse("cert_reached",
+        '"file:copy_file_nginx_cert_$(s)",
+         "file:copy_file_nginx_cert_key_$(s)"', ""));
+
+      "error_label" string => "ERROR: nginx:site ($(s))";
+
+  classes:
+    cert_reached::
+      "cert_source_error" not => "cert_source_ok";
+      "cert_key_source_error" not => "cert_key_source_ok";
+    default:any::
+      "args_valid"
+               and => {
+                        "site_ok",
+                        "template_ok",
+                        "template_data_ok",
+                        "!cert_source_error",
+                        "!cert_key_source_error",
+                      };
+
+      "site_$(s)_error" expression => "!args_valid|class:batch_nginx_site_$(s)_error", scope => "namespace";
+      "site_$(s)_repaired" expression => "class:batch_nginx_site_$(s)_repaired", scope => "namespace";
+      "site_$(s)_kept" expression => "class:batch_nginx_site_$(s)_kept", scope => "namespace";
+      "site_$(s)_ok" expression => "class:batch_nginx_site_$(s)_ok", scope => "namespace";
+
+  methods:
+    args_valid::
+      "site_available_$(s)" usebundle => file:edit_file('{
+        "id": "nginx_site_available_$(s)",
+        "path": "$(config.sites_available_dir)/$(s).conf",
+        "owner": "$(config.owner)",
+        "mode": "644",
+        "create": "true",
+        "template": "$(template)",
+        "template_data": $(template_data)
+      }');
+
+      "site_enabled_$(s)" usebundle => file:edit_link('{
+        "id": "nginx_site_enabled_$(s)",
+        "path": "$(config.sites_enabled_dir)/$(s).conf",
+        "link_from": "$(config.sites_available_dir)/$(s).conf"
+      }');
+
+    cert_reached.args_valid::
+      "cert_$(s)" usebundle => file:copy_file('{
+        "id": "nginx_cert_$(s)",
+        "path": "$(config.homedir)/$(s).crt",
+        "mode": "644",
+        "source": "$(cert_source)",
+      }');
+
+      "cert_key_$(s)" usebundle => file:copy_file('{
+        "id": "nginx_cert_key_$(s)",
+        "path": "$(config.homedir)/$(s).key",
+        "source": "$(cert_key_source)"
+      }');
+
+    args_valid::
+      "batch" usebundle => class:batch("nginx_site_$(s)", "$(batch_classes)");
+
+  reports:
+    !template_ok::
+      "$(error_label) expected field 'template'";
+    !template_data_ok::
+      "$(error_label) failed to parse field 'template_data'";
+    cert_source_error::
+      "$(error_label) expected field 'certificate[source]'";
+    cert_key_source_error::
+      "$(error_label) expected field 'certificate[key_source]'";
+}
+
+bundle agent nginx_user
+{
+  vars:
+      "groups_secondary" string => format("%S", "nginx:config.groups_secondary");
+
+  classes:
+      "user_error" expression => "user:edit_user_nginx_error", scope => "namespace";
+      "user_repaired" expression => "user:edit_user_nginx_repaired", scope => "namespace";
+      "user_kept" expression => "user:edit_user_nginx_kept", scope => "namespace";
+      "user_ok" expression => "user:edit_user_nginx_ok", scope => "namespace";
+
+  methods:
+      "nginx_user"            usebundle => user:edit_user('{
+        "username":           "nginx",
+        "homedir":            "$(config.homedir)",
+        "groups_secondary":   $(groups_secondary)
+      }');
+}
+
+bundle agent service
+{
+  services:
+    class:batch_nginx_pre_service_repaired::
+      "nginx"
+      service_policy => "restart",
+      service_method => service:chkconfig,
+             classes => class:namespace("service");
+
+    class:batch_nginx_pre_service_ok::
+      "nginx"
+      service_policy => "start",
+      service_method => service:chkconfig,
+             classes => class:namespace("service");
+}

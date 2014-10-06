@@ -1,0 +1,154 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+from contextlib import closing
+from mysql.connector import connect, errorcode
+from promises import Promise, CompoundPromise
+from traceback import format_exc
+
+import json
+import mysql.connector
+import re
+import sys
+import traceback
+
+class DatabasePresentPromise(Promise):
+    def __init__(self, name):
+        super(DatabasePresentPromise, self).__init__()
+        self.name = name
+        self.default_character_set = None
+        self.collate = None
+
+    def mark_found(self):
+        self._promise_kept = True
+
+    def mark_created(self):
+        self._promise_repaired = True
+
+class ModulePromise(CompoundPromise):
+    pass
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.parse_failed = False
+        self.errors = []
+        self.root_password = None
+        self.database_promises = []
+
+    def parse(self, args):
+        if len(args) != 3:
+            self.parse_failed = True
+            self.errors.append(
+                ("Module mysql_databases must be invoked with exactly two "
+                 "arguments: The MySQL server root password and "
+                 "a JSON representation of the MySQL databases"))
+            return
+
+        try:
+             promises_args = json.loads(args[2])
+        except ValueError as e:
+            self.parse_failed = True
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        self.root_password = args[1]
+
+        for db_name, db_args in promises_args.iteritems():
+            p = DatabasePresentPromise(db_name)
+            if "default_character_set" in db_args:
+                p.default_character_set = db_args["default_character_set"]
+            if "collate" in db_args:
+                p.collate = db_args["collate"]
+
+            self.database_promises.append(p)
+
+def repair_database(cnx, db_promise):
+    with closing(cnx.cursor()) as cursor:
+        # Find database
+        cursor.execute(
+            ("SELECT COUNT(*) FROM information_schema.SCHEMATA "
+             "WHERE SCHEMA_NAME = %s"),
+            (db_promise.name,))
+
+        count, = cursor.fetchone()
+
+        if count:
+            db_promise.mark_found()
+            return
+
+        cursor.execute(
+            ("CREATE DATABASE `{0}` "
+             "DEFAULT CHARACTER SET `{1}` COLLATE `{2}`").format(
+                db_promise.name, db_promise.default_character_set,
+                db_promise.collate))
+
+        db_promise.mark_created()
+
+def main():
+    mp = ModulePromise()
+    try:
+        argparser = ArgumentParser()
+        argparser.parse(sys.argv)
+        for error in argparser.errors:
+            mp.err(error)
+        if not argparser.parse_failed:
+            for db_promise in argparser.database_promises:
+                mp.add_promise(db_promise)
+
+            with closing(connect(
+                    user="root",
+                    password=argparser.root_password)) as cnx:
+                for db_promise in mp.promises:
+                    repair_database(cnx, db_promise)
+
+    except mysql.connector.Error as e:
+        if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            mp.err("Database username or password incorrect")
+        else:
+            mp.err(format_exc())
+    except Exception as e:
+        mp.err(format_exc())
+
+    for p in mp.promises:
+        if p.promise_kept:
+            print("+database_kept_" + p.name)
+            mp.keptmsg("Database '{0}' is as promised".format(p.name))
+        if p.promise_repaired:
+            print("+database_created_" + p.name)
+            mp.repairmsg("Database '{0}' was created".format(p.name))
+        if p.promise_ok:
+            print("+database_ok_" + p.name)
+        if p.repair_failed:
+            print("+database_error_" + p.name)
+        if p.errlog:
+            mp.err(p.errlog.read())
+
+    if mp.promise_kept:
+        print("+databases_kept")
+        mp.keptmsg("MySQL databases are as promised")
+
+    if mp.promise_repaired:
+        print("+databases_repaired")
+        mp.repairmsg("* MySQL databases were repaired")
+
+    if mp.promise_ok:
+        print("+databases_ok")
+
+    if mp.repair_failed:
+        print("+databases_error")
+        mp.err("ERROR: MySQL databases could not be repaired")
+
+    if mp.keptlog:
+        print("%kept_messages=" + json.dumps(
+            [ line.rstrip() for line in mp.keptlog.readlines() ]))
+
+    if mp.repairlog:
+        print("%repair_messages=" + json.dumps(
+            [ line.rstrip() for line in mp.repairlog.readlines() ]))
+
+    if mp.errlog:
+        print("%errors=" + json.dumps(
+            [ "  " + line.rstrip() for line in mp.errlog.readlines() ]))
+
+if __name__ == "__main__":
+    main()

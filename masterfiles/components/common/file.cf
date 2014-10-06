@@ -1,0 +1,684 @@
+# FILE
+#
+
+body file control
+{
+  namespace => "file";
+     inputs => {
+                "$(inputs:lib.files)",
+                "$(inputs:components.common[class])",
+               };
+}
+
+bundle agent config(info)
+{
+  vars:
+      "restorecon_cmd"      string => "/sbin/restorecon",
+                        ifvarclass => not(isvariable("restorecon_cmd"));
+      "restorecon_cmd"      string => "$(info[restorecon_cmd])",
+                        ifvarclass => isvariable("info[restorecon_cmd]");
+}
+
+bundle agent edit_dir(argsjson)
+{
+  vars:
+      "args"                    data => parsejson('{}');
+      "args"                    data => parsejson("$(argsjson)");
+
+      "path"                  string => "$(args[path])";
+
+      "id"                    string => "";
+      "id"                    string => canonify(lastnode("$(args[path])", "/")),
+                          ifvarclass => isvariable("args[path]");
+      "id"                    string => canonify("$(args[id])"),
+                          ifvarclass => isvariable("args[id]");
+
+      "mode"                  string => "755";
+      "mode"                  string => "$(args[mode])",
+                          ifvarclass => isvariable("args[mode]");
+
+      "owner"                 string => "root";
+      "owner"                 string => "$(args[owner])",
+                          ifvarclass => isvariable("args[owner]");
+
+      "group"                 string => "$(owner)";
+      "group"                 string => "$(args[group])",
+                          ifvarclass => isvariable("args[group]");
+
+      "create_requested"      string => "false";
+      "create_requested"      string => "$(args[create])",
+                          ifvarclass => isvariable("args[create]");
+
+      "restorecon_requested"  string => "false";
+      "restorecon_requested"  string => "$(args[restorecon])",
+                          ifvarclass => isvariable("args[restorecon]");
+
+      "label"                 string => "$(path) ($(mode), $(owner), $(group))";
+      "label"                 string => "'$(id)' ($(mode), $(owner), $(group))",
+                          ifvarclass => not(isvariable("args[path]"));
+      "error_label"           string => "ERROR: file:edit_dir";
+
+  classes:
+      "has_id" not => strcmp("", "$(id)");
+
+    has_id::
+      "path_error" not => isvariable("args[path]");
+      "path_isplainfile_error" expression => isplain("$(path)");
+      "parent_error" not => isdir(dirname("$(path)")), ifvarclass => "!path_error";
+      "mode_error" not => regcmp("\d\d\d", "$(mode)");
+      "owner_error" not => userexists("$(owner)");
+      "group_error" not => groupexists("$(group)");
+
+      "create_requested" expression => strcmp("$(create_requested)", "true");
+      "restorecon_requested" expression => strcmp("true", "$(restorecon_requested)");
+
+      "create_requested_error" not => regcmp("true|false", "$(create_requested)");
+      "restorecon_requested_error"
+        not => regcmp("true|false", "$(restorecon_requested)");
+      "nonexistent_directory_error" not => fileexists("$(path)"),
+        ifvarclass => "!create_requested.!create_requested_error";
+
+      "edit_dir_$(id)_error"
+                or => {
+                        "path_error",
+                        "path_isplainfile_error",
+                        "parent_error",
+                        "mode_error",
+                        "owner_error",
+                        "group_error",
+                        "create_requested_error",
+                        "restorecon_requested_error",
+                        "nonexistent_directory_error",
+                        "exists_error",
+                        "perms_error",
+                        "restorecon_error"
+                      },
+             scope => "namespace";
+
+      "edit_dir_$(id)_repaired"
+                or => {
+                        "exists_repaired",
+                        "perms_repaired",
+                        "restorecon_repaired",
+                      },
+        ifvarclass => "!edit_dir_$(id)_error",
+             scope => "namespace";
+
+      "edit_dir_$(id)_kept"
+               and => {
+                        "exists_kept|!create_requested",
+                        "perms_kept"
+                      },
+        ifvarclass => "!edit_dir_$(id)_repaired.!edit_dir_$(id)_error",
+             scope => "namespace";
+
+      "edit_dir_$(id)_ok"
+                or => {
+                        "edit_dir_$(id)_kept",
+                        "edit_dir_$(id)_repaired"
+                      },
+             scope => "namespace";
+
+  files:
+    create_requested::
+      "$(path)/."
+            create => "true",
+           classes => class:local("exists"),
+        ifvarclass => "has_id.!edit_dir_$(id)_error";
+
+    default:any::
+      "$(path)/."
+             perms => default:mog("$(mode)", "$(owner)", "$(group)"),
+           classes => class:local("perms"),
+        ifvarclass => "has_id.!edit_dir_$(id)_error";
+
+  commands:
+    restorecon_requested.(exists_repaired|perms_repaired)::
+      "$(config.restorecon_cmd) '$(path)'"
+           classes => class:local("restorecon"),
+        ifvarclass => "has_id.!edit_dir_$(id)_error";
+
+  reports:
+    default:policy_debug_mode::
+      "Directory $(label) is as promised"
+      ifvarclass => "edit_dir_$(id)_kept";
+    exists_repaired::
+      "+ Directory $(label) was created";
+    perms_repaired.!exists_repaired::
+      "* Permissions for directory $(label) were repaired";
+    restorecon_repaired::
+      "* Restored SELinux context for directory $(label)";
+    !has_id::
+      "ERROR: file:edit_dir failed to parse 'id' from arguments '$(argsjson)'";
+    perms_error::
+      "$(error_label) failed to repair permissions for $(label)";
+    restorecon_error::
+      "$(error_label) failed to execute restorecon for $(label)";
+    exists_error::
+      "$(error_label) failed to create $(label)";
+    path_error::
+      "$(error_label) expected argument 'path'";
+    path_isplainfile_error::
+      "$(error_label) did not expect plain file at $(label)";
+    parent_error::
+      "$(error_label) expected parent directory for $(label)";
+    mode_error::
+      "$(error_label) received invalid mode argument '$(mode)' for $(label)";
+    owner_error::
+      "$(error_label) received invalid owner argument '$(owner)' for $(label)";
+    group_error::
+      "$(error_label) received invalid group argument '$(group)' for $(label)";
+    nonexistent_directory_error::
+      "$(error_label) expected existing directory or argument 'create' for $(label)";
+    create_requested_error::
+      "$(error_label) expected argument 'create' to be 'true' or 'false' for $(label)";
+    restorecon_requested_error::
+      "$(error_label) expected argument 'restorecon' to be 'true' or 'false' for $(label)";
+}
+
+bundle agent edit_file(argsjson)
+{
+  vars:
+      "args"                    data => parsejson('{}');
+      "args"                    data => parsejson("$(argsjson)");
+
+      "path"                  string => "$(args[path])";
+
+      "id"                    string => "";
+      "id"                    string => canonify(lastnode("$(args[path])", "/")),
+                          ifvarclass => isvariable("args[path]");
+      "id"                    string => canonify("$(args[id])"),
+                          ifvarclass => isvariable("args[id]");
+
+      "mode"                  string => "600";
+      "mode"                  string => "$(args[mode])",
+                          ifvarclass => isvariable("args[mode]");
+
+      "owner"                 string => "root";
+      "owner"                 string => "$(args[owner])",
+                          ifvarclass => isvariable("args[owner]");
+
+      "group"                 string => "$(owner)";
+      "group"                 string => "$(args[group])",
+                          ifvarclass => isvariable("args[group]");
+
+      "create_requested"      string => "false";
+      "create_requested"      string => "$(args[create])",
+                          ifvarclass => isvariable("args[create]");
+
+      "restorecon_requested"  string => "false";
+      "restorecon_requested"  string => "$(args[restorecon])",
+                          ifvarclass => isvariable("args[restorecon]");
+
+      "quoted_values"           data => mergedata("args[quoted_values]");
+      "variable_values"         data => mergedata("args[variable_values]");
+
+      "template"              string => "$(args[template])";
+      "template_data"           data => mergedata("args[template_data]");
+
+      "contents"               slist => getvalues("args[contents]");
+      "content_sources"        slist => getvalues("args[content_sources]");
+      "extra_contents"         slist => getvalues("args[extra_contents]");
+
+      "label"                 string => "$(path) ($(mode), $(owner), $(group))";
+      "label"                 string => "'$(id)' ($(mode), $(owner), $(group))",
+                          ifvarclass => not(isvariable("args[path]"));
+      "error_label"           string => "ERROR: file:edit_file";
+
+  classes:
+      "has_id" not => strcmp("", "$(id)");
+
+    has_id::
+      "path_error" not => isvariable("args[path]");
+      "path_isdir_error" expression => isdir("$(path)");
+      "parent_error" not => isdir(dirname("$(path)")), ifvarclass => "!path_error";
+      "mode_error" not => regcmp("\d\d\d", "$(mode)");
+      "owner_error" not => userexists("$(owner)");
+      "group_error" not => groupexists("$(group)");
+      "create_requested_error" not => regcmp("true|false", "$(create_requested)");
+      "restorecon_requested_error"
+        not => regcmp("true|false", "$(restorecon_requested)");
+
+      "create_requested" expression => strcmp("true", "$(create_requested)");
+      "restorecon_requested" expression => strcmp("true", "$(restorecon_requested)");
+      "has_quoted_values" expression => isvariable("args[quoted_values]");
+      "has_variable_values" expression => isvariable("args[variable_values]");
+      "has_template" expression => isvariable("args[template]");
+      "has_template_data" expression => isvariable("args[template_data]");
+      "has_contents" expression => isvariable("args[contents]");
+      "has_content_sources" expression => isvariable("args[content_sources]");
+      "has_extra_contents" expression => isvariable("args[extra_contents]");
+      "delete_contents" expression => strcmp(length("contents"), "0"),
+        ifvarclass => "has_contents";
+
+      "template_error" not => fileexists("$(template)"), ifvarclass => "has_template";
+      "template_data_error" not => "has_template_data", ifvarclass => "has_template";
+      "content_source_error_$(content_sources)" not => isplain("$(content_sources)");
+      "content_sources_error" expression => classmatch("file:content_source_error_.*");
+      "nonexistent_file_error" not => fileexists("$(path)"),
+        ifvarclass => "!create_requested.!create_requested_error";
+
+      "edit_contents"
+                or => {
+                        "has_quoted_values",
+                        "has_variable_values",
+                        "has_template",
+                        "has_contents",
+                        "has_content_sources",
+                        "has_extra_contents",
+                      };
+
+      "edit_file_$(id)_error"
+                or => {
+                        "path_error",
+                        "path_isdir_error",
+                        "parent_error",
+                        "mode_error",
+                        "owner_error",
+                        "group_error",
+                        "create_requested_error",
+                        "restorecon_requested_error",
+                        "template_error",
+                        "template_data_error",
+                        "content_sources_error",
+                        "nonexistent_file_error",
+                        "exists_error",
+                        "perms_error",
+                        "contents_error",
+                        "restorecon_error",
+                      },
+             scope => "namespace";
+
+      "edit_file_$(id)_repaired"
+                or => {
+                        "exists_repaired",
+                        "perms_repaired",
+                        "contents_repaired",
+                        "restorcon_repaired",
+                      },
+        ifvarclass => "!edit_file_$(id)_error",
+             scope => "namespace";
+
+      "edit_file_$(id)_kept"
+               and => {
+                        "exists_kept|!create_file",
+                        "perms_kept",
+                        "contents_kept|!edit_contents"
+                      },
+        ifvarclass => "!edit_file_$(id)_repaired.!edit_file_$(id)_error",
+             scope => "namespace";
+
+      "edit_file_$(id)_ok"
+                or => {
+                        "edit_file_$(id)_kept",
+                        "edit_file_$(id)_repaired"
+                      },
+             scope => "namespace";
+
+      "use_template" expression => "has_template",
+        ifvarclass =>"has_id.!edit_file_$(id)_error";
+
+  files:
+    create_requested::
+      "$(path)"
+               create => "true",
+              classes => class:local("exists"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_create_$(id)";
+    default:any::
+      "$(path)"
+                perms => default:mog("$(mode)", "$(owner)", "$(group)"),
+              classes => class:local("perms"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_perms_$(id)";
+
+    has_quoted_values::
+      "$(path)"
+            edit_line => default:set_quoted_values("file:$(this.bundle).quoted_values"),
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_set_quoted_values_$(id)";
+
+    has_variable_values::
+      "$(path)"
+            edit_line => default:set_variable_values(
+                                                  "file:$(this.bundle).variable_values"),
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_set_variable_values_$(id)";
+
+    # CAREFUL: Class use_template is here because using edit_file_$(id)_error
+    # makes the template not resolvable
+    use_template::
+      "$(path)"
+        edit_template => "$(template)",
+      template_method => "mustache",
+        template_data => mergedata("template_data"),
+              classes => class:local("contents"),
+               handle => "file_edit_file_template_$(id)";
+
+    has_content_sources::
+      "$(path)"
+            edit_line => default:insert_file(@(content_sources)),
+        edit_defaults => default:empty,
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_insert_file_$(id)";
+
+    has_contents.!delete_contents::
+      "$(path)"
+            edit_line => default:insert_lines(@(contents)),
+        edit_defaults => default:empty,
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_insert_lines_$(id)";
+
+    has_contents.delete_contents::
+      "$(path)"
+            edit_line => default:delete_lines_matching(".*"),
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_delete_lines_$(id)";
+
+    has_extra_contents::
+      "$(path)"
+            edit_line => default:insert_lines(@(extra_contents)),
+              classes => class:local("contents"),
+           ifvarclass => "has_id.!edit_file_$(id)_error",
+               handle => "file_edit_file_insert_extra_lines_$(id)";
+
+  commands:
+    restorecon_requested.(exists_repaired|perms_repaired|contents_repaired)::
+      "$(config.restorecon_cmd) '$(path)'"
+              classes => class:local("restorecon"),
+           ifvarclass => "has_id.!edit_dir_$(id)_error",
+               handle => "file_edit_file_restorecon_$(id)";
+
+  reports:
+    default:policy_debug_mode::
+      "File $(label) is as promised"
+      ifvarclass => "edit_file_$(id)_kept";
+    exists_repaired::
+      "+ File $(label) was created";
+    perms_repaired.!exists_repaired.!contents_repaired::
+      "* File $(label) permissions were repaired";
+    contents_repaired.!exists_repaired.!perms_repaired::
+      "* File $(label) was edited";
+    contents_repaired.perms_repaired.!exists_repaired::
+      "* File $(label) was edited and permissions were repaired";
+    restorecon_repaired::
+      "* File $(label) SELinux context was restored";
+    !has_id::
+      "ERROR: file:edit_file failed to parse 'id' from arguments '$(argsjson)'";
+    path_error::
+      "ERROR: file:edit_file expected argument 'path'";
+    path_isdir_error::
+      "$(error_label) did not expect directory at $(label)";
+    parent_error::
+      "$(error_label) expected parent directory for $(label)";
+    mode_error::
+      "$(error_label) received invalid mode argument '$(mode)' for $(label)";
+    owner_error::
+      "$(error_label) received invalid owner argument '$(owner)' for $(label)";
+    group_error::
+      "$(error_label) received invalid group argument '$(group)' for $(label)";
+    create_requested_error::
+      "$(error_label) expected argument 'create' to be 'true' or 'false' for $(label)";
+    restorecon_requested_error::
+      "$(error_label) expected argument 'restorecon' to be 'true' or 'false' for $(label)";
+    nonexistent_file_error::
+      "$(error_label) expected existing file or argument 'create' for $(label)";
+    template_error::
+      "$(error_label) expected template file at $(template) for $(label)";
+    template_data_error::
+      "$(error_label) expected argument 'template_data'";
+    exists_error::
+      "$(error_label) failed to create $(label)";
+    restorecon_error::
+      "$(error_label) failed to execute restorecon for $(label)";
+    perms_error::
+      "$(error_label) failed to repair permissions for $(label)";
+    contents_error::
+      "$(error_label) failed to edit contents for $(label)";
+    default:any::
+      "$(error_label) expected content source file $(content_sources) for $(label)"
+      ifvarclass => canonify("content_source_error_$(content_sources)");
+}
+
+bundle agent copy_file(argsjson)
+{
+  vars:
+      "args"                    data => parsejson('{}');
+      "args"                    data => parsejson("$(argsjson)");
+
+      "path"                  string => "$(args[path])";
+
+      "id"                    string => "";
+      "id"                    string => canonify(lastnode("$(args[path])", "/")),
+                          ifvarclass => isvariable("args[path]");
+      "id"                    string => canonify("$(args[id])"),
+                          ifvarclass => isvariable("args[id]");
+
+      "source"                string => "$(args[source])";
+
+      "mode"                  string => "600";
+      "mode"                  string => "$(args[mode])",
+                          ifvarclass => isvariable("args[mode]");
+
+      "owner"                 string => "root";
+      "owner"                 string => "$(args[owner])",
+                          ifvarclass => isvariable("args[owner]");
+
+      "group"                 string => "$(owner)";
+      "group"                 string => "$(args[group])",
+                          ifvarclass => isvariable("args[group]");
+
+      "label"                 string => "$(path) ($(mode), $(owner), $(group))";
+      "label"                 string => "'$(id)' ($(mode), $(owner), $(group))",
+                          ifvarclass => not(isvariable("args[path]"));
+      "error_label"           string => "ERROR: file:copy_file";
+
+  classes:
+      "has_id" not => strcmp("", "$(id)");
+
+    has_id::
+      "path_error" not => isvariable("args[path]");
+      "source_error" not => isvariable("args[source]");
+      "source_nonexistent_error" not => fileexists("$(source)"),
+        ifvarclass => "!source_error";
+      "path_isdir_error" expression => isdir("$(path)");
+      "parent_error" not => isdir(dirname("$(path)")), ifvarclass => "!path_error";
+      "mode_error" not => regcmp("\d\d\d", "$(mode)");
+      "owner_error" not => userexists("$(owner)");
+      "group_error" not => groupexists("$(group)");
+
+      "file_nonexistent" not => fileexists("$(path)");
+
+      "copy_file_$(id)_error"
+                or => {
+                        "path_error",
+                        "source_error",
+                        "source_nonexistent_error",
+                        "path_isdir_error",
+                        "parent_error",
+                        "mode_error",
+                        "owner_error",
+                        "group_error",
+                        "copy_error",
+                        "perms_error"
+                      },
+             scope => "namespace";
+
+      "copy_file_$(id)_repaired"
+                or => {
+                        "copy_repaired",
+                        "perms_repaired"
+                      },
+        ifvarclass => "!copy_file_$(id)_error",
+             scope => "namespace";
+
+      "copy_file_$(id)_kept"
+               and => {
+                        "copy_kept",
+                        "perms_kept"
+                      },
+        ifvarclass => "!copy_file_$(id)_repaired.!copy_file_$(id)_error",
+             scope => "namespace";
+
+      "copy_file_$(id)_ok"
+                or => {
+                        "copy_file_$(id)_kept",
+                        "copy_file_$(id)_repaired"
+                      },
+             scope => "namespace";
+
+  files:
+      "$(path)"
+       copy_from => default:local_dcp("$(source)"),
+         classes => class:local("copy"),
+          handle => "file_copy_file_copy_$(id)",
+      ifvarclass => "has_id.!copy_file_$(id)_error";
+
+      "$(path)"
+           perms => default:mog("$(mode)", "$(owner)", "$(group)"),
+         classes => class:local("perms"),
+          handle => "file_copy_file_perms_$(id)",
+      ifvarclass => "has_id.!copy_file_$(id)_error";
+
+  reports:
+    default:policy_debug_mode::
+      "File $(label) is as promised"
+        ifvarclass => "copy_file_$(id)_kept";
+    copy_repaired.file_nonexistent::
+      "+ File $(label) was copied"
+        ifvarclass => "copy_file_$(id)_repaired";
+    copy_repaired.!file_nonexistent::
+      "* File $(label) was overwritten"
+        ifvarclass => "copy_file_$(id)_repaired";
+    perms_repaired.!copy_repaired::
+      "* File $(label) permissions were repaired"
+        ifvarclass => "copy_file_$(id)_repaired";
+    !has_id::
+      "$(error_label) failed to parse 'id' from arguments '$(argsjson)'";
+    path_error::
+      "$(error_label) expected argument 'path' for $(label)";
+    source_error::
+      "$(error_label) expected argument 'source' for $(label)";
+    source_nonexistent_error::
+      "$(error_label) expected source file at $(source) for $(label)";
+    path_isdir_error::
+      "$(error_label) did not expect directory at $(label)";
+    parent_error::
+      "$(error_label) expected parent directory for $(label)";
+    mode_error::
+      "$(error_label) received invalid mode argument '$(mode)' for $(label)";
+    owner_error::
+      "$(error_label) received invalid owner argument '$(owner)' for $(label)";
+    group_error::
+      "$(error_label) received invalid group argument '$(group)' for $(label)";
+    copy_error::
+      "$(error_label) failed to create $(label)";
+    perms_error::
+      "$(error_label) failed to repair permissions for $(label)";
+}
+
+# NOTE: This bundle is throwing an error when the owner and group
+# given do not match the owner and group of the link_from file
+#
+bundle agent edit_link(argsjson)
+{
+  vars:
+      "args"                    data => parsejson('{}');
+      "args"                    data => parsejson("$(argsjson)");
+
+      "path"                  string => "$(args[path])";
+
+      "id"                    string => "";
+      "id"                    string => canonify(lastnode("$(args[path])", "/")),
+                          ifvarclass => isvariable("args[path]");
+      "id"                    string => canonify("$(args[id])"),
+                          ifvarclass => isvariable("args[id]");
+
+      "link_from"             string => "$(args[link_from])";
+
+      "label"                 string => "$(path) -> $(link_from)";
+      "label"                 string => "'$(id)' -> $(link_from)",
+                          ifvarclass => not(isvariable("args[path]"));
+      "label"                 string => "$(path)",
+                          ifvarclass => not(isvariable("args[link_from]"));
+      "label"                 string => "'$(id)'",
+                          ifvarclass => and(not(isvariable("args[path]")),
+                                            not(isvariable("args[link_from]")));
+
+      "error_label"           string => "ERROR: file:edit_link";
+
+  classes:
+      "has_id" not => strcmp("", "$(id)");
+
+    has_id::
+      "path_error" not => isvariable("args[path]");
+      "link_from_error" not => isvariable("args[link_from]");
+      "path_isplainfile_error" expression => isplain("$(path)");
+      "path_isdir_error" expression => isdir("$(path)");
+      "parent_error" not => isdir(dirname("$(path)")), ifvarclass => "!path_error";
+      "link_from_nonexistent_error" not => fileexists("$(link_from)"),
+        ifvarclass => "!link_from_arg_error";
+
+      "edit_link_$(id)_error"
+                or => {
+                        "path_error",
+                        "link_from_error",
+                        "path_isplainfile_error",
+                        "path_isdir_error",
+                        "parent_error",
+                        "link_from_nonexistent_error",
+                        "ln_s_error",
+                      },
+             scope => "namespace";
+
+      "edit_link_$(id)_repaired"
+        expression => "ln_s_repaired",
+        ifvarclass => "!edit_link_$(id)_error",
+             scope => "namespace";
+
+      "edit_link_$(id)_kept"
+        expression => "ln_s_kept",
+        ifvarclass => "!edit_link_$(id)_error.!edit_link_$(id)_repaired",
+             scope => "namespace";
+
+      "edit_link_$(id)_ok"
+                or => {
+                        "edit_link_$(id)_repaired",
+                        "edit_link_$(id)_kept",
+                      },
+             scope => "namespace";
+
+  files:
+      "$(path)"
+       link_from => default:ln_s("$(link_from)"),
+         classes => class:local("ln_s"),
+          handle => "file_edit_link_from_$(id)",
+      ifvarclass => "has_id.!edit_link_$(id)_error";
+
+  reports:
+    default:policy_debug_mode::
+      "Link $(label) is as promised"
+        ifvarclass => "edit_link_$(id)_kept";
+    default:any::
+      "+ Link $(label) was created"
+        ifvarclass => "edit_link_$(id)_repaired";
+    !has_id::
+      "$(error_label) failed to parse 'id' from arguments '$(argsjson)'";
+    path_error::
+      "$(error_label) expected argument 'path' for $(label)";
+    link_from_error::
+      "$(error_label) expected argument 'link_from' for $(label)";
+    link_from_nonexistent_error::
+      "$(error_label) expected target file at $(link_from) for $(label)";
+    path_isplainfile_error::
+      "$(error_label) did not expect plain file at $(label)";
+    path_isdir_error::
+      "$(error_label) did not expect directory at $(label)";
+    parent_error::
+      "$(error_label) expected parent directory for $(label)";
+}

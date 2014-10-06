@@ -1,0 +1,283 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import json
+import sys
+
+class Repository(object):
+    REPOSITORY_POLICIES = [ "RELEASE", "SNAPSHOT", "MIXED" ]
+    PROVIDER_HINTS = [ "maven2", "rubygems-proxy" ]
+    TYPES = [ "rpms" ]
+    WRITE_POLICIES = [ "READ_ONLY", "ALLOW_WRITE_ONCE", "ALLOW_WRITE" ]
+
+    def __init__(self, repo_id):
+        self.repo_id = repo_id
+        self.name = None
+        self.remote_url = None
+        self.artifact_max_age = None
+        self.repo_policy = "RELEASE"
+        self.provider_hint = "maven2"
+        self.write_policy = None
+
+    @property
+    def data(self):
+        data = {}
+        data["id"] = self.repo_id
+        data["name"] = self.name
+        data["repositoryPolicy"] = self.repo_policy
+        data["providerHint"] = self.provider_hint
+        data["indexable"] = self.provider_hint != "rubygems-proxy"
+
+        if self.repo_policy == "SNAPSHOT":
+            self.artifact_max_age = 1440
+        if self.repo_policy == "RELEASE":
+            self.artifact_max_age = -1
+        if self.repo_policy == "MIXED":
+            self.artifact_max_age = -1
+
+        if self.remote_url:
+            data["remoteStorage"] = { "url": self.remote_url }
+            data["notFoundCacheActive"] = True
+            data["remoteRepositoryAccess"] = {
+              "artifactMaxAge": self.artifact_max_age
+            }
+
+        if self.write_policy:
+            data["writePolicy"] = self.write_policy
+        else:
+            if self.remote_url:
+                data["writePolicy"] = "READ_ONLY"
+            elif self.repo_policy == "RELEASE":
+                data["writePolicy"] = "ALLOW_WRITE_ONCE"
+            elif self.repo_policy == "SNAPSHOT":
+                data["writePolicy"] = "ALLOW_WRITE"
+
+        return data
+
+class RepositoryTarget(object):
+    def __init__(self, target_id):
+        self.target_id = target_id
+        self.name = None
+        self.content_class = None
+        self.patterns = []
+
+    @property
+    def data(self):
+        data = {}
+        data["id"] = self.target_id
+        data["name"] = self.name
+        data["contentClass"] = self.content_class
+        data["patterns"] = self.patterns
+        return data
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.errors = []
+        self.repositories = []
+        self.repository_targets = []
+
+    def parse(self, args):
+        if len(args) != 2:
+            self.errors.append(("Module nexus_config_parser must be "
+                "invoked with exactly one argument: A JSON representation "
+                "of elements for nexus.xml"))
+            return
+
+        try:
+             config_args = json.loads(args[1])
+        except ValueError as e:
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        if type(config_args) != dict:
+            self.errors.append(
+                ("Module nexus_config_parser is expected " "to be invoked "
+                 "with a JSON dictionary but received '{0}'"
+                ).format(config_args))
+            return
+
+        #
+        # Ensure top level keys are present
+        #
+
+        if "repositories" not in config_args:
+            self.errors.append(
+                ("Module nexus_config_parser expects a JSON dictionary with "
+                 "entry 'repositories' but received '{0}'"
+                ).format(config_args))
+        else:
+            repo_args = config_args["repositories"]
+            if type(repo_args) != dict:
+                self.errors.append(
+                    ("Module nexus_config_parser is expected to have key "
+                     "'repositories' with type 'dict' but received '{0}'"
+                    ).format(type(repo_args)))
+
+        if "repository_targets" not in config_args:
+            self.errors.append(
+                ("Module nexus_config_parser expects a JSON dictionary with "
+                 "entry 'repository_targets' but received '{0}'"
+                ).format(config_args))
+        else:
+            repotarget_args = config_args["repository_targets"]
+            if type(repotarget_args) != dict:
+                self.errors.append(
+                    ("Module nexus_config_parser is expected to have key "
+                     "'repository_targets' with type 'dict' but received '{0}'"
+                    ).format(type(repotarget_args)))
+
+        if self.errors:
+            return
+
+        #
+        # Parse repositories
+        #
+        for repo_id, repo_arg in repo_args.iteritems():
+            if type(repo_arg) != dict:
+                self.errors.append(
+                    ("Repository '{0}' is expected to be defined as an object "
+                     "but received '{1}'"
+                    ).format(repo_id, repo_arg))
+                continue
+
+            repo_error = False
+            repo = Repository(repo_id)
+            
+            if "name" not in repo_arg:
+                repo_error = True
+                self.errors.append(
+                    ("Repository '{0}' is expected to have key 'name'"
+                    ).format(repo_id))
+            else:
+                repo.name = repo_arg["name"]
+
+            if "provider_hint" in repo_arg:
+                provider_hint = repo_arg["provider_hint"]
+                if provider_hint not in Repository.PROVIDER_HINTS:
+                    repo_error = True
+                    self.errors.append(
+                        ("Repository '{0}' was defined with an unexpected "
+                         "value for key 'provider_hint': '{1}'"
+                        ).format(repo_id, provider_hint))
+                else:
+                    repo.provider_hint = provider_hint
+
+            if "remote_url" in repo_arg:
+                repo.remote_url = repo_arg["remote_url"]
+
+            if "repository_policy" in repo_arg:
+                repo_policy = repo_arg["repository_policy"]
+                if repo_policy not in Repository.REPOSITORY_POLICIES:
+                    repo_error = True
+                    self.errors.append(
+                        ("Repository '{0}' was defined with an unexpected "
+                         "value for key 'repository_policy': '{1}'"
+                        ).format(repo_id, repo_policy))
+                else:
+                    repo.repo_policy = repo_policy
+
+            # Type is validate here, but only used by capabilities at the moment
+            if "type" in repo_arg:
+                repo_type = repo_arg["type"]
+                if repo_type not in Repository.TYPES:
+                    repo_error = True
+                    self.errors.append(
+                        ("Repository '{0}' was defined with an unexpected "
+                         "value for key 'type': '{1}'"
+                        ).format(repo_id, repo_type))
+
+            if "write_policy" in repo_arg:
+                write_policy = repo_arg["write_policy"]
+                if write_policy not in Repository.WRITE_POLICIES:
+                    repo_error = True
+                    self.errors.append(
+                        ("Repository '{0}' was defined with an unexpected "
+                         "value for key 'write_policy': '{1}'"
+                        ).format(repo_id, write_policy))
+                else:
+                    repo.write_policy = write_policy
+
+            if not repo_error:
+                self.repositories.append(repo)
+
+        #
+        # Parse repository targets
+        #
+        for target_id, target_arg in repotarget_args.iteritems():
+            if type(target_arg) != dict:
+                self.errors.append(
+                    ("Repository target '{0}' is expected to be defined as "
+                     "an object but received '{1}'"
+                    ).format(repo_id, target_arg))
+                continue
+
+            target_error = False
+            repotarget = RepositoryTarget(target_id)
+
+            if "name" not in target_arg:
+                target_error = True
+                self.errors.append(
+                    ("Repository target '{0}' is expected to have key 'name'"
+                    ).format(target_id))
+            else:
+                repotarget.name = target_arg["name"]
+
+            if "content_class" not in target_arg:
+                target_error = True
+                self.errors.append(
+                    ("Repository target '{0}' is expected to have key "
+                     "'content_class'"
+                    ).format(target_id))
+            else:
+                repotarget.content_class = target_arg["content_class"]
+
+            if "patterns" not in target_arg:
+                target_error = True
+                self.errors.append(
+                    ("Repository target '{0}' is expected to have key "
+                     "'patterns'"
+                    ).format(target_id))
+            else:
+                patterns = target_arg["patterns"]
+                if type(patterns) == list:
+                    repotarget.patterns.extend(patterns)
+                elif isinstance(patterns, basestring):
+                    repotarget.patterns.append(patterns)
+                else:
+                    target_error = True
+                    self.errors.append(
+                        ("Repository target '{0}' is expected to have key "
+                         "'patterns' with type 'string' but received '{1}'"
+                        ).format(target_id, type(patterns)))
+
+            if not target_error:
+                self.repository_targets.append(repotarget)
+
+def main():
+    errors = []
+
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+
+    if argparser.errors:
+        errors.extend(argparser.errors)
+    else:
+        data = {}
+        data["repositories"] = sorted(
+            [ r.data for r in argparser.repositories ],
+            key=lambda r: r["id"])
+
+        data["repository_targets"] = sorted(
+            [ t.data for t in argparser.repository_targets ],
+            key=lambda t: t["id"])
+
+    if errors:
+        print("+config_parser_error")
+        print("%errors=" + json.dumps(errors))
+    else:
+        print("+config_parser_ok")
+        print("%data=" + json.dumps(data, sort_keys=True))
+
+if __name__ == "__main__":
+    main()

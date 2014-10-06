@@ -1,0 +1,39 @@
+# GITLAB TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.daemons[gitlab])",
+               };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => gitlab:validate;
+      "ok"                usebundle => assert_not_class("gitlab:validation_ok");
+}
+
+bundle agent A1_02_validate_validConfig_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"                  data => parsejson('{
+        "version":            "1",
+        "host":               "gitlab.test.local",
+        "database_password":  "P@55word"
+      }');
+
+  methods:
+      "config"            usebundle => gitlab:config(@(info));
+      "validate"          usebundle => gitlab:validate;
+      "validation_ok"     usebundle => assert_class("gitlab:validation_ok");
+}

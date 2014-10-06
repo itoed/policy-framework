@@ -1,0 +1,39 @@
+# NETWORK TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.os[network])",
+               };
+}
+
+bundle agent A1_01_validate_noConfig_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"            usebundle => network:validate;
+      "validation_not_ok"   usebundle => assert_not_class("network:validation_ok");
+}
+
+bundle agent A1_02_validate_withConfig_validationClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"            data => parsejson('{
+        "ip":           "1.2.3.4",
+        "hostname":     "testhost",
+        "domain":       "testdomain"
+      }');
+
+  methods:
+      "config"          usebundle => network:config(@(info));
+      "validate"        usebundle => network:validate;
+      "validation_ok"   usebundle => assert_class("network:validation_ok");
+}

@@ -1,0 +1,56 @@
+# RUBY
+#
+
+body file control
+{
+  namespace => "ruby";
+     inputs => {
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"         slist => { "config" };
+
+  vars:
+      "version"           string => "$(info[version])",
+                      ifvarclass => isvariable("info[version]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"            slist => { "validation" };
+
+  classes:
+      "version_error"            not => isvariable("ruby:config.version");
+
+      "validation_ok"
+             and => { "!version_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Version field is missing";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"        slist => { "control" };
+
+  classes:
+      "error" expression => "package:yum_addupdate_ruby_error", scope => "namespace";
+      "repaired" expression => "package:yum_addupdate_ruby_repaired", scope => "namespace";
+      "kept" expression => "package:yum_addupdate_ruby_kept", scope => "namespace";
+      "ok" expression => "package:yum_addupdate_ruby_ok", scope => "namespace";
+
+  methods:
+      "package"         usebundle => package:yum_addupdate('{
+        "name":         "ruby",
+        "version":      "$(config.version)"
+      }');
+}

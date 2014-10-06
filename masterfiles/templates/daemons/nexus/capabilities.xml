@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<capabilitiesConfiguration>
+  <version>2.0.0</version>
+  <capabilities>
+    {{#capabilities}}
+    <capability>
+      <version>{{version}}</version>
+      <id>{{id}}</id>
+      <typeId>{{typeId}}</typeId>
+      <properties>
+        {{#properties}}
+        <property>
+          <key>{{key}}</key>
+          <value>{{value}}</value>
+        </property>
+        {{/properties}}
+      </properties>
+    </capability>
+    {{/capabilities}}
+  </capabilities>
+</capabilitiesConfiguration>

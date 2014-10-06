@@ -1,0 +1,319 @@
+# NEXUS CLIENT
+#
+
+body file control
+{
+  namespace => "nexus_client";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "default_curl_path"       string => "/usr/bin/curl";
+      "default_netrc_path"      string => "/root/.netrc";
+      "default_netrc_owner"     string => "root";
+      "default_netrc_group"     string => "root";
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"          slist => { "config" };
+
+  vars:
+      "netrc"         string => "$(knowledge.default_netrc_path)",
+                  ifvarclass => not(isvariable("netrc"));
+
+      "netrc"         string => "$(info[netrc_path])",
+                  ifvarclass => isvariable("info[netrc_path]");
+
+      "netrc_owner"   string => "$(knowledge.default_netrc_owner)",
+                  ifvarclass => not(isvariable("netrc_owner"));
+
+      "netrc_owner"   string => "$(info[netrc_owner])",
+                  ifvarclass => isvariable("info[netrc_owner]");
+
+      "netrc_group"   string => "$(info[netrc_group])",
+                  ifvarclass => isvariable("info[netrc_group]");
+
+      "netrc_group"   string => "$(knowledge.default_netrc_group)",
+                  ifvarclass => not(isvariable("netrc_group"));
+
+      "curl"          string => "$(knowledge.default_curl_path)",
+                  ifvarclass => not(isvariable("curl"));
+
+      "curl"          string => "$(info[curl_path])",
+                  ifvarclass => isvariable("info[curl_path]");
+
+      "hostname"      string => "$(info[hostname])",
+                  ifvarclass => isvariable("info[hostname]");
+
+      "username"      string => "$(info[username])",
+                  ifvarclass => isvariable("info[username]");
+
+      "password"      string => "$(info[password])",
+                  ifvarclass => isvariable("info[password]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"        slist => { "validation" };
+
+  classes:
+      "has_hostname"
+      expression => isvariable("nexus_client:config.hostname"),
+           scope => "namespace";
+
+      "has_username"
+      expression => isvariable("nexus_client:config.username"),
+           scope => "namespace";
+
+      "has_password"
+      expression => isvariable("nexus_client:config.password"),
+           scope => "namespace";
+
+      "validation_ok"
+             and => { "has_hostname", "has_username", "has_password" },
+           scope => "namespace";
+
+  reports:
+    !has_hostname::
+      "ERROR: Hostname missing";
+    !has_username::
+      "ERROR: Username is missing";
+    !has_password::
+      "ERROR: Password is missing";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"          slist => { "control" };
+
+  methods:
+      "netrc_file"      usebundle => netrc_file;
+}
+
+bundle agent netrc_file
+{
+  classes:
+      "file_exists"
+      expression => fileexists("$(config.netrc)");
+
+  methods:
+    validation_ok::
+      "create"                usebundle => file:edit_file('{
+        "path":       "$(config.netrc)",
+        "create":     "true",
+        "owner":      "$(config.netrc_owner)",
+        "contents":   [
+          "machine $(config.hostname)",
+          "login $(config.username)",
+          "password $(config.password)"
+        ]
+      }');
+
+    !validation_ok.file_exists::
+      "create_and_edit"       usebundle => file:edit_file('{
+        "path":       "$(config.netrc)",
+        "owner":      "$(config.netrc_owner)"
+      }');
+}
+
+bundle agent download(argsjson)
+{
+  vars:
+      "args"                  data => parsejson("$(argsjson)"),
+                           classes => class:local("args");
+
+      "output_file"         string => "$(args[output_file])",
+                           classes => class:local("output_file");
+
+      "repo"                string => "$(args[repo])",
+                           classes => class:local("repo");
+
+      "group_id"            string => "$(args[group_id])",
+                           classes => class:local("group_id");
+
+      "artifact_id"         string => "$(args[artifact_id])",
+                           classes => class:local("artifact_id");
+
+      "version"             string => "$(args[version])",
+                           classes => class:local("version");
+
+      "packaging"           string => "$(args[packaging])",
+                           classes => class:local("packaging");
+
+      "classifier"          string => "",
+                        ifvarclass => not(isvariable("args[classifier]"));
+      "classifier"          string => "$(args[classifier])",
+                        ifvarclass => isvariable("args[classifier]");
+
+      "mode"                string => "600";
+      "mode"                string => "$(args[mode])",
+                        ifvarclass => isvariable("args[mode]");
+
+      "owner"               string => "root";
+      "owner"               string => "$(args[owner])",
+                        ifvarclass => isvariable("args[owner]");
+
+      "group"               string => "$(owner)";
+      "group"               string => "$(args[group])",
+                        ifvarclass => isvariable("args[group]");
+
+      "id"                  string => canonify("$(output_file)"),
+                        ifvarclass => not(isvariable("args[id]")),
+                           classes => class:local("id");
+      "id"                  string => canonify("$(args[id])"),
+                        ifvarclass => isvariable("args[id]"),
+                           classes => class:local("id");
+
+  classes:
+      "mode_error" not => regcmp("\d\d\d", "$(mode)");
+      "owner_error" not => userexists("$(owner)");
+      "group_error" not => groupexists("$(group)");
+      "parentdir_error" not => isdir(dirname("$(o)"));
+      "output_file_isdir_error" expression => isdir("$(o)");
+
+      "args_valid"
+             and => {
+                      "args_ok",
+                      "output_file_ok",
+                      "repo_ok",
+                      "group_id_ok",
+                      "artifact_id_ok",
+                      "version_ok",
+                      "packaging_ok",
+                      "id_ok",
+                      "!mode_error",
+                      "!owner_error",
+                      "!group_error",
+                      "!output_file_isdir_error",
+                      "!parentdir_error",
+                    };
+
+    id_ok::
+      "download_$(id)_error"
+              or => {
+                      "!args_valid",
+                      "curl_$(id)_error",
+                      "file:edit_file_nexus_client_download_$(id)_error",
+                    },
+           scope => "namespace";
+
+      "download_$(id)_repaired"
+              or => {
+                      "curl_$(id)_repaired",
+                      "file:edit_file_nexus_client_download_$(id)_repaired",
+                    },
+      ifvarclass => "!download_$(id)_error",
+           scope => "namespace";
+
+      "download_$(id)_kept"
+             and => {
+                      "curl_$(id)_kept",
+                      "file:edit_file_nexus_client_download_$(id)_kept",
+                    },
+      ifvarclass => "!download_$(id)_error.!download_$(id)_repaired",
+           scope => "namespace";
+
+      "download_$(id)_ok"
+              or => { "download_$(id)_repaired", "download_$(id)_kept" },
+           scope => "namespace";
+
+  methods:
+    args_valid::
+      "curl_$(id)"    usebundle => _curl("$(id)", "$(output_file)", "$(repo)",
+                                         "$(group_id)", "$(artifact_id)",
+                                         "$(version)", "$(packaging)", "$(classifier)");
+
+      "perms_$(id)"   usebundle => file:edit_file('{
+        "id":         "nexus_client_download_$(id)",
+        "path":       "$(output_file)",
+        "mode":       "$(mode)",
+        "owner":      "$(owner)",
+        "group":      "$(group)"
+      }'), ifvarclass => "curl_$(id)_ok";
+
+  reports:
+    !args_ok::
+      "ERROR: nexus_client:download could not parse id from '$(argsjson)'";
+    !output_file_ok::
+      "ERROR: nexus_client:download expected argument 'output_file' for '$(id)'";
+    !repo_ok::
+      "ERROR: nexus_client:download expected argument 'repo' for '$(id)'";
+    !group_id_ok::
+      "ERROR: nexus_client:download expected argument 'group_id' for '$(id)'";
+    !artifact_id_ok::
+      "ERROR: nexus_client:download expected argument 'artifact_id' for '$(id)'";
+    !version_ok::
+      "ERROR: nexus_client:download expected argument 'version' for '$(id)'";
+    !packaging_ok::
+      "ERROR: nexus_client:download expected argument 'packaging' for '$(id)'";
+    mode_error::
+      "ERROR: nexus_client:download received invalid argument 'mode' '$(mode)' for '$(id)'";
+    owner_error::
+      "ERROR: nexus_client:download received invalid argument 'owner' '$(owner)' for '$(id)'";
+    group_error::
+      "ERROR: nexus_client:download received invalid argument 'group' '$(group)' for '$(id)'";
+    parentdir_error::
+      "ERROR: nexus_client:download received expected parent directory for file $(output_file) for '$(id)'";
+    output_file_isdir_error::
+      "ERROR: nexus_client:download path $(output_file) for '$(id)' is a directory";
+}
+
+bundle agent _curl(id, output_file, r, g, a, v, p, c)
+{
+  vars:
+      "service_url"     string => concat("http://$(config.hostname)/service/",
+                                          "local/artifact/maven/redirect");
+
+      "curl_args"       string => concat("-sS -f -L --netrc -o $(output_file) ",
+                          "$(service_url)?r=$(r)&g=$(g)&a=$(a)&v=$(v)&p=$(p)");
+
+      "curl_args"       string => "$(curl_args)&c=$(c)",
+                    ifvarclass => not(strcmp("$(c)", ""));
+
+  classes:
+      "file_did_not_exist" not => fileexists("$(output_file)");
+      "file_exists" expression => fileexists("$(output_file)");
+
+      "curl_$(id)_error"
+        expression => "call_curl_error",
+             scope => "namespace";
+
+    file_exists::
+      "curl_$(id)_kept"
+               not => "file_did_not_exist_$(id)",
+             scope => "namespace";
+
+      "curl_$(id)_repaired"
+        expression => "call_curl_repaired",
+             scope => "namespace";
+
+      "curl_$(id)_ok"
+                or => {
+                        "curl_$(id)_kept",
+                        "curl_$(id)_repaired"
+                      },
+             scope => "namespace";
+
+  commands:
+    file_did_not_exist::
+      "$(config.curl) $(curl_args)"
+         classes => class:local("call_curl");
+
+  reports:
+      "+ Artifact file $(output_file) was downloaded"
+      ifvarclass => "curl_$(id)_repaired",
+          handle => "curl_$(id)_repaired";
+
+      "ERROR: Artifact file $(output_file) could not be downloaded"
+      ifvarclass => "curl_$(id)_error",
+          handle => "curl_$(id)_error";
+}

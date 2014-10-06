@@ -1,0 +1,152 @@
+# CLASS TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[class])",
+            };
+}
+
+bundle agent A1_namespaceCmd_exit2_classKeptIsSet(x)
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "execute_command"   usebundle => _execute_command(2);
+      "kept"              usebundle => assert_class("execute_command_kept");
+      "ok"                usebundle => assert_class("execute_command_ok");
+      "not_repaired"      usebundle => assert_not_class("execute_command_repaired");
+      "not_error"         usebundle => assert_not_class("execute_command_error");
+}
+
+bundle agent B1_batch_class1KeptClass2Repaired_repairedClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "class1_kept"       expression => "default:any",
+                               scope => "namespace";
+      "class1_ok"         expression => "default:any",
+                               scope => "namespace";
+      "class2_repaired"   expression => "default:any",
+                               scope => "namespace";
+      "class2_ok"         expression => "default:any",
+                               scope => "namespace";
+
+  methods:
+      "batch"               usebundle => class:batch("test_b1", '[
+        "test:class1",
+        "test:class2"
+      ]');
+
+      "repaired"      usebundle => assert_class("class:batch_test_b1_repaired");
+      "ok"            usebundle => assert_class("class:batch_test_b1_ok");
+      "not_kept"      usebundle => assert_not_class("class:batch_test_b1_kept");
+      "not_error"     usebundle => assert_not_class("class:batch_test_b1_error");
+}
+
+bundle agent B2_batch_class1KeptClass2Error_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "class1_kept"       expression => "default:any",
+                               scope => "namespace";
+      "class1_ok"         expression => "default:any",
+                               scope => "namespace";
+      "class2_error"      expression => "default:any",
+                               scope => "namespace";
+
+  methods:
+      "batch"    usebundle => class:batch("test_b2", '[
+        "test:class1",
+        "test:class2"
+      ]');
+
+      "error"         usebundle => assert_class("class:batch_test_b2_error");
+      "not_repaired"  usebundle => assert_not_class("class:batch_test_b2_repaired");
+      "not_kept"      usebundle => assert_not_class("class:batch_test_b2_kept");
+      "not_ok"        usebundle => assert_not_class("class:batch_test_b2_ok");
+}
+
+bundle agent B3_batch_noClassesSet_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "batch"    usebundle => class:batch("test_b3", '[
+        "test:class1",
+        "test:class2"
+      ]');
+
+      "error"         usebundle => assert_class("class:batch_test_b3_error");
+      "not_repaired"  usebundle => assert_not_class("class:batch_test_b3_repaired");
+      "not_kept"      usebundle => assert_not_class("class:batch_test_b3_kept");
+      "not_ok"        usebundle => assert_not_class("class:batch_test_b3_ok");
+}
+
+bundle agent B4_batch_unresolvableArgs_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "batch"    usebundle => class:batch("test_b4", '[
+        "$(not_a_class)",
+        "test:class2"
+      ]');
+
+      "error"         usebundle => assert_class("class:batch_test_b4_error");
+      "not_repaired"  usebundle => assert_not_class("class:batch_test_b4_repaired");
+      "not_kept"      usebundle => assert_not_class("class:batch_test_b4_kept");
+      "not_ok"        usebundle => assert_not_class("class:batch_test_b4_ok");
+}
+
+bundle agent B5_batch_unresolvableId_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "class1_kept"       expression => "default:any",
+                               scope => "namespace";
+      "class1_ok"         expression => "default:any",
+                               scope => "namespace";
+      "class2_repaired"   expression => "default:any",
+                               scope => "namespace";
+      "class2_ok"         expression => "default:any",
+                               scope => "namespace";
+
+      "has_classes"
+      expression => classmatch("class:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "batch"    usebundle => class:batch("$(test_b5)", '[
+        "test:class1",
+        "test:class2"
+      ]');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent _execute_command(returncode)
+{
+  commands:
+      "/bin/sh -c 'exit $(returncode)'"
+      classes => class:namespace_cmd("execute_command");
+}

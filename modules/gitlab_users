@@ -1,0 +1,260 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+from bcrypt import hashpw, gensalt
+from contextlib import closing
+from datetime import datetime
+from mysql.connector import errorcode
+
+import argparse
+import json
+import mysql.connector
+import os
+import random
+import shlex
+import string
+import subprocess
+import sys
+import traceback
+
+ADMIN_ID = 1
+THEME_ID = 2
+PROJECTS_LIMIT = 10
+IS_ADMIN = 1
+
+class GitlabUsersException(Exception):
+    pass
+
+def generate_token():
+    return "".join(random.choice(string.hexdigits) for _ in range(20))
+
+class Key(object):
+    def __init__(self, title, location):
+        self.title = title
+        if not os.path.isfile(location):
+            raise GitlabUsersException("Key {0} does not exist".format(
+                location))
+        self.location = location
+
+        # Load key contents
+        with open(location, "r") as keyfile:
+            self.contents = keyfile.read().rstrip()
+
+        # Generate fingerprint
+        process = subprocess.Popen(shlex.split("ssh-keygen -lf '{0}'".format(
+            location)), stdout=subprocess.PIPE)
+
+        if process.returncode:
+            raise GitlabUsersException(
+                "Failed to get finger print for key " + location)
+
+        self.fingerprint = process.communicate()[0].split(" ")[1]
+
+class User(object):
+    def __init__(self, username, user_dict):
+        self.userid = None
+        self.username = username
+        self.name = user_dict["name"]
+        self.email = user_dict["email"]
+        self.password = user_dict["password"]
+
+        self.keys = []
+        if "keys" in user_dict:
+            self.keys = [ Key(title, user_dict["keys"][title])
+                          for title in user_dict["keys"] ]
+
+        self.error = None
+        self.created = False
+        self.repaired_fields = []
+
+class Logger(object):
+    log = []
+    def write(self, data):
+        self.log.append(data)
+
+errors = []
+users = []
+all_keys = []
+
+logger = Logger()
+sys_stderr = sys.stderr
+sys.stderr = logger
+
+try:
+    #
+    #   Parse arguments
+    #
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dbuser", help="Username to login to MySQL")
+    parser.add_argument("dbpass", help="Password to login to MySQL")
+    parser.add_argument("users_json", help="Gitlab users to verify")
+    args = parser.parse_args()
+
+    try:
+        users_dict = json.loads(args.users_json)
+    except ValueError as e:
+        raise GitlabUsersException("Invalid JSON '{0}'".format(
+            args.users_json))
+
+    users = [ User(u, users_dict[u]) for u in users_dict ]
+
+    with closing(mysql.connector.connect(
+            user=args.dbuser,
+            password=args.dbpass,
+            database="gitlabhq_production")) as cnx:
+        for u in users:
+            with closing(cnx.cursor()) as cursor:
+                # Changes will be rolled back in case of any error
+                cnx.start_transaction()
+                try:
+                    # Find user
+                    cursor.execute(
+                        ("SELECT id, name, email, encrypted_password, "
+                         "password_expires_at "
+                         "FROM users WHERE username = %s"),
+                        (u.username,))
+
+                    row = cursor.fetchone()
+                    if row:
+                        #
+                        #   Verify and repair existing user
+                        #
+                        (userid, name, email, hashedpw, pwexpires) = row
+
+                        u.userid = userid
+
+                        if u.name != name:
+                            cursor.execute(
+                                ("UPDATE users SET name = %s "
+                                 "WHERE username = %s"),
+                                (u.name, u.username))
+                            u.repaired_fields.append("name")
+
+                        if u.email != email:
+                            cursor.execute(
+                                ("UPDATE users SET email = %s "
+                                 "WHERE username = %s"),
+                                (u.email, u.username))
+                            u.repaired_fields.append("email")
+
+                        if hashpw(u.password, hashedpw) != hashedpw:
+                            cursor.execute(
+                                ("UPDATE users SET encrypted_password = %s "
+                                 "WHERE username = %s"),
+                                (hashpw(u.password, gensalt()), u.username))
+                            u.repaired_fields.append("password")
+                    else:
+                        #
+                        #   Create new user
+                        #
+                        now = datetime.now()
+                        auth_token = generate_token()
+                        cursor.execute(
+                            ("INSERT INTO users ("
+                             "email, encrypted_password, created_at, "
+                             "updated_at, name, admin, "
+                             "projects_limit, authentication_token, theme_id, "
+                             "username, created_by_id, confirmed_at) "
+                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                             "%s, %s)"),
+                            (u.email, hashpw(u.password, gensalt()), now,
+                             now, u.name, IS_ADMIN,
+                             PROJECTS_LIMIT, auth_token, THEME_ID,
+                             u.username, ADMIN_ID, now))
+                        u.userid = cursor.lastrowid
+                        u.created = True
+                    #
+                    #   Verify and repair keys
+                    #
+                    for key in u.keys:
+                        # Find RSA key
+                        cursor.execute(
+                            ("SELECT `user_id` FROM `keys` "
+                             "WHERE `key` = %s OR `fingerprint` = %s"),
+                            (key.contents, key.fingerprint))
+                        keys = cursor.fetchall()
+                        if not keys:
+                            now = datetime.now()
+                            # Create the missing RSA key
+                            cursor.execute(
+                                ("INSERT INTO `keys` ("
+                                 "`user_id`, `created_at`, `updated_at`, "
+                                 "`key`, `title`, `fingerprint`) "
+                                 "VALUES (%s, %s, %s, %s, %s, %s)"),
+                                (u.userid, now, now,
+                                 key.contents, key.title, key.fingerprint))
+                            u.repaired_fields.append("key " + key.title)
+                        else:
+                            (user_id,) = keys[0]
+                            if u.userid != userid:
+                                raise GitlabUsersException(
+                                    "Key has already been taken")
+                    cnx.commit()
+                except Exception as e:
+                    u.error = traceback.format_exc()
+                    cnx.rollback()
+        with closing(cnx.cursor()) as cursor:
+            cursor.execute("SELECT `id`, `key` FROM `keys`")
+            for row in cursor:
+                all_keys.append(row)
+except mysql.connector.Error as e:
+    if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+        errors.append("Database username or password incorrect")
+    else:
+        errors.extend(traceback.format_exc().split("\n"))
+except GitlabUsersException as e:
+    errors.append(str(e))
+except Exception as e:
+    errors.extend(traceback.format_exc().split("\n"))
+except SystemExit as e:
+    errors.extend(logger.log)
+
+sys.stderr = sys_stderr
+
+#
+#   Print CFEngine classes and variables per user
+#
+if users:
+    user_errors = {}
+    repaired_fields = {}
+    for u in users:
+        if u.error:
+            print("+users_error_{0}".format(u.username))
+            user_errors[u.username] = u.error
+        elif u.created:
+            print("+users_created_{0}".format(u.username))
+        elif u.repaired_fields:
+            print("+users_repaired_{0}".format(u.username))
+            repaired_fields[u.username] = ", ".join(u.repaired_fields)
+        else:
+            print("+users_kept_{0}".format(u.username))
+
+    if user_errors:
+        print("%error={0}".format(json.dumps(user_errors)))
+    if repaired_fields:
+        print("%repaired={0}".format(json.dumps(repaired_fields)))
+#
+#   Print overall CFEngine classes and variables
+#
+if errors or user_errors:
+    print("+users_error")
+    print("%errors=" + json.dumps(
+        [ e.rstrip() for e in errors if e.rstrip() ]))
+elif repaired_fields:
+    print("+users_repaired")
+    print("+users_ok")
+else:
+    print("+users_kept")
+    print("+users_ok")
+if not errors or user_errors:
+    authorized_keys = []
+    for (key_id, contents) in all_keys:
+        key_options = []
+        key_options.append('command="{0} key-{1}"'.format(
+            "/home/git/gitlab-shell/bin/gitlab-shell", key_id))
+        key_options.append("no-port-forwarding")
+        key_options.append("no-X11-forwarding")
+        key_options.append("no-agent-forwarding")
+        key_options.append("no-pty")
+        authorized_keys.append("{0} {1}".format(",".join(key_options), contents))
+    print("%authorized_keys=" + json.dumps(authorized_keys))

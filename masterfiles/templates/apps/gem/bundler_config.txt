@@ -1,0 +1,4 @@
+---
+{{#mirrors}}
+BUNDLE_MIRROR__{{original}}: {{url}}
+{{/mirrors}}

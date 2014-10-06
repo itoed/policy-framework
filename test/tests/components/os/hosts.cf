@@ -1,0 +1,100 @@
+# HOSTS TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.os[hosts])",
+               };
+}
+
+bundle agent A1_01_usingDefaults_hostsFileMatches
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "network_info"        data => parsejson('{
+        "ip":               "1.2.3.4",
+        "hostname":         "test",
+        "domain":           "localhost"
+      }');
+
+      "hosts_info"          data => parsejson('{
+        "hosts_file":       "$(knowledge.tmp_dir)/hosts",
+        "owner":            "$(knowledge.env_user)"
+      }');
+
+  methods:
+      "network_config"    usebundle => network:config(@(network_info));
+      "hosts_config"      usebundle => hosts:config(@(hosts_info));
+      "hosts_file"        usebundle => hosts:hosts_file;
+
+      "file_matches"      usebundle => assert_file_diff(
+                                        "$(knowledge.expected_dir)/hosts/default.txt",
+                                        "$(knowledge.tmp_dir)/hosts");
+}
+
+bundle agent A1_02_oneLanHost_hostsFileMatches
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "expected_path"     string => "$(knowledge.expected_dir)/hosts/testhost.txt";
+      "actual_path"       string => "$(knowledge.tmp_dir)/hosts";
+
+      "network_info"        data => parsejson('{
+        "ip":               "1.2.3.4",
+        "hostname":         "test",
+        "domain":           "localhost"
+      }');
+
+      "hosts_info"          data => parsejson('{
+        "hosts_file":       "$(actual_path)",
+        "owner":            "$(knowledge.env_user)",
+        "lan": {
+          "192.168.0.1":    [ "testhost.test.local", "testhost" ]
+        }
+      }');
+
+  methods:
+      "network_config"    usebundle => network:config(@(network_info));
+      "hosts_config"      usebundle => hosts:config(@(hosts_info));
+      "hosts_file"        usebundle => hosts:hosts_file;
+
+      "file_matches"      usebundle => assert_file_diff("$(expected_path)",
+                                                        "$(actual_path)");
+}
+
+bundle agent A1_03_oneAlias_hostsFileMatches
+{
+  meta:
+      "tags"           slist => { "test", "tmpdir" };
+
+  vars:
+      "expected_path"     string => "$(knowledge.expected_dir)/hosts/self-alias.txt";
+      "actual_path"       string => "$(knowledge.tmp_dir)/hosts";
+
+      "network_info"        data => parsejson('{
+        "ip":               "1.2.3.4",
+        "hostname":         "test",
+        "domain":           "localhost"
+      }');
+
+      "hosts_info"          data => parsejson('{
+        "hosts_file":       "$(actual_path)",
+        "owner":            "$(knowledge.env_user)",
+        "aliases":          [ "self.test.local" ]
+      }');
+
+  methods:
+      "network_config"    usebundle => network:config(@(network_info));
+      "hosts_config"      usebundle => hosts:config(@(hosts_info));
+      "hosts_file"        usebundle => hosts:hosts_file;
+
+      "file_matches"      usebundle => assert_file_diff("$(expected_path)",
+                                                        "$(actual_path)");
+}

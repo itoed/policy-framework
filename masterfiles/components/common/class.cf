@@ -1,0 +1,96 @@
+# CLASS
+#
+
+body file control
+{
+  namespace => "class";
+}
+
+body classes namespace(x)
+{
+      promise_kept => { "$(x)_ok", "$(x)_kept" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired" };
+     repair_failed => { "$(x)_error", "$(x)_repair_failed" };
+     repair_denied => { "$(x)_error", "$(x)_repair_denied" };
+    repair_timeout => { "$(x)_error", "$(x)_repair_timeout" };
+             scope => "namespace";
+}
+
+body classes local(x)
+{
+      promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+     repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+     repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+    repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+             scope => "bundle";
+}
+
+body classes namespace_cmd(x)
+{
+  repaired_returncodes => { "0" };
+    failed_returncodes => { "1" };
+      kept_returncodes => { "2" };
+          promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+      promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+         repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+         repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+        repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+                 scope => "namespace";
+}
+
+bundle agent batch(id, argsjson)
+{
+  vars:
+      "args"                  data => parsejson('[]');
+      "args"                  data => parsejson("$(argsjson)");
+
+      "c"                    slist => getvalues("args");
+
+      "error_classes"        slist => maplist("$(this)_error", "c");
+      "repaired_classes"     slist => maplist("$(this)_repaired", "c");
+      "kept_classes"         slist => maplist("$(this)_kept", "c");
+      "ok_classes"           slist => maplist("$(this)_ok", "c");
+
+      "kept_expr"           string => join(".", "kept_classes");
+      "ok_expr"             string => join(".", "ok_classes");
+
+  classes:
+      "valid_id" expression => regcmp(".+", canonify("$(id)"));
+
+    valid_id::
+      "args_error" expression => strcmp("0", length("c"));
+
+      "none_$(c)" not => "$(c)_error|$(c)_repaired|$(c)_kept|$(c)_ok";
+      "none" expression => classify("none_$(c)");
+      "error_classes" expression => "$(error_classes)";
+
+      "batch_$(id)_error"
+                or => {
+                        "args_error",
+                        "none",
+                        "error_classes",
+                      },
+             scope => "namespace";
+
+      "batch_$(id)_repaired"
+        expression => "$(repaired_classes)", scope => "namespace",
+        ifvarclass => "!batch_$(id)_error";
+
+      "batch_$(id)_kept"
+        expression => "$(kept_expr)", scope => "namespace",
+        ifvarclass => "!batch_$(id)_error.!batch_$(id)_repaired";
+
+      "batch_$(id)_ok"
+        expression => "$(ok_expr)", scope => "namespace",
+        ifvarclass => "!batch_$(id)_error";
+
+  reports:
+    !valid_id::
+      "ERROR: class:batch expected valid id for batch $(argsjson)";
+    args_error::
+      "ERROR: class:batch failed to parse arguments '$(argsjson)'";
+    !error_classes::
+      "ERROR: class:batch expected at least one class for '$(c)' for batch '$(id)'"
+      ifvarclass => canonify("none_$(c)");
+}

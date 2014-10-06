@@ -1,0 +1,292 @@
+# GEM
+#
+
+body file control
+{
+  namespace => "gem";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+                "$(inputs:components.platforms[ruby])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies"             slist => {
+                                            "ruby",
+                                          },
+                                  meta => { "dependencies" };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"         slist => { "config" };
+
+  vars:
+      "bundler_version"   string => "$(info[bundler_version])",
+                      ifvarclass => isvariable("info[bundler_version]");
+
+      "user"              string => "root",
+                      ifvarclass => not(isvariable("user"));
+      "user"              string => "$(info[owner])",
+                      ifvarclass => isvariable("info[owner]");
+
+      "root_homedir"      string => "/root",
+                      ifvarclass => not(isvariable("root_homedir"));
+      "root_homedir"      string => "$(info[root_homedir])",
+                      ifvarclass => isvariable("info[root_homedir]");
+
+      "sources"             data => parsejson('[ "https://rubygems.org/" ]'),
+                      ifvarclass => not(isvariable("sources"));
+      "sources"             data => mergedata("info[sources]"),
+                      ifvarclass => isvariable("info[sources]");
+
+      # Templates
+      "templatedir"       string => "$(inputs:dirs.templatedir)/apps/gem";
+      "gemrc_template"    string => "$(templatedir)/gemrc.txt";
+      "bundler_config_template"
+                          string => "$(templatedir)/bundler_config.txt";
+
+      # Modules
+      "moduledir"         string => "$(inputs:dirs.moduledir)";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"          slist => { "validation" };
+
+  classes:
+      "bundler_version_error" not => isvariable("gem:config.bundler_version");
+
+      "validation_ok"
+               and => {
+                        "!bundler_version_error",
+                      },
+             scope => "namespace";
+
+  reports:
+    bundler_version_error::
+      "ERROR: gem:config expects field 'bundler_version'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"        slist => { "control" };
+
+  classes:
+      "error"
+             and => { "$(root_gemrc_file[error])",
+                      "$(bundler[error])",
+                    },
+           scope => "namespace";
+
+    !error::
+      "repaired"
+              or => { "$(root_gemrc_file[repaired])",
+                      "$(bundler[repaired])",
+                    },
+           scope => "namespace";
+
+      "kept"
+             and => { "$(root_gemrc_file[kept])",
+                      "$(bundler[kept])",
+                    },
+           scope => "namespace";
+
+      "ok"
+             and => { "$(root_gemrc_file[ok])",
+                      "$(bundler[ok])",
+                    },
+           scope => "namespace";
+
+  methods:
+      "root_gemrc_file"     usebundle => gemrc_file('{
+        "id":               "root",
+        "homedir":          "$(config.root_homedir)",
+        "user":            "$(config.user)"
+      }');
+
+    (ruby:ok).gemrc_file_root_ok::
+      "bundler"             usebundle => package:gem_add('{
+        "name":             "bundler",
+        "version":          "$(config.bundler_version)"
+      }');
+
+    default:any::
+      "batch"               usebundle => class:batch("gem", '[
+        "gem:gemrc_file_root",
+        "package:gem_add_bundler",
+      ]');
+}
+
+bundle agent gemrc_file(argsjson)
+{
+  vars:
+      "args"                data => parsejson('{}');
+      "args"                data => parsejson("$(argsjson)");
+
+      "homedir"           string => "$(args[homedir])";
+
+      "id"                string => "";
+      "id"                string => canonify("$(args[id])"),
+                      ifvarclass => isvariable("args[id]");
+      "id"                string => canonifyuniquely("gem_gemrc_file_$(homedir)"),
+                      ifvarclass => not(isvariable("args[id]"));
+
+      "file_id"           string => canonifyuniquely("$(id)");
+
+      "sources"             data => mergedata("gem:config.sources");
+      "sources"             data => mergedata("args[sources]"),
+                      ifvarclass => isvariable("args[sources]");
+
+      "user"              string => "root";
+      "user"              string => "$(args[user])",
+                      ifvarclass => isvariable("args[user]");
+
+      "sources_json"      string => format("%S", "sources");
+
+  classes:
+      "valid_id" expression => regcmp(".+", "$(id)");
+
+    valid_id::
+      "homedir_error" not => isvariable("args[homedir]");
+
+      "gemrc_file_$(id)_error"
+                or => { "homedir_error", "file:edit_file_$(file_id)_error" },
+             scope => "namespace";
+      "gemrc_file_$(id)_kept"
+        expression => "file:edit_file_$(file_id)_kept",
+             scope => "namespace";
+      "gemrc_file_$(id)_repaired"
+        expression => "file:edit_file_$(file_id)_repaired",
+             scope => "namespace";
+      "gemrc_file_$(id)_ok"
+        expression => "file:edit_file_$(file_id)_ok",
+             scope => "namespace";
+
+  methods:
+      "gemrc_file"            usebundle => file:edit_file('{
+        "id":                 "$(file_id)",
+        "path":               "$(homedir)/.gemrc",
+        "owner":              "$(user)",
+        "create":             "true",
+        "template":           "$(config.gemrc_template)",
+        "template_data": {
+          "sources":          $(sources_json)
+        }
+      }'),
+                             ifvarclass => "valid_id.!gemrc_file_$(id)_error";
+
+  reports:
+    homedir_error::
+      "ERROR: gem:gemrc_file expected field 'homedir' in arguments '$(argsjson)'";
+    !valid_id::
+      "ERROR: gem:gemrc_file failed to parse 'id' from arguments '$(argsjson)'";
+}
+
+bundle agent bundler_config_file(argsjson)
+{
+  vars:
+      "args"            data => parsejson('{}');
+      "args"            data => parsejson("$(argsjson)");
+
+      "homedir"       string => "$(args[homedir])";
+      "user"          string => "$(args[user])";
+
+      "bundler_dir"   string => "$(homedir)/.bundle";
+      "path"          string => "$(bundler_dir)/config";
+
+      "mirrors"         data => parsejson('{}');
+      "mirrors"         data => mergedata("args[mirrors]");
+
+      "m"              slist => getindices("mirrors");
+      "upcase[$(m)]"  string => string_upcase("$(m)");
+      "m_json"         slist => maplist('{
+        "original":     "$(upcase[$(this)])",
+        "url":          "$(mirrors[$(this)])"
+      }', "m");
+      "mirrors_json"        string => '[]',
+                        ifvarclass => strcmp(length("m"), "0"),
+                           classes => class:local("mirrors_json");
+      "mirrors_json"        string => format('[ %s ]', join(", ", "m_json")),
+                        ifvarclass => isgreaterthan(length("m"), "0"),
+                           classes => class:local("mirrors_json");
+
+      "id"            string => canonify("$(user)"),
+                  ifvarclass => not(isvariable("args[id]")),
+                     classes => class:local("id");
+      "id"            string => canonify("$(args[id])"),
+                  ifvarclass => isvariable("args[id]"),
+                     classes => class:local("id");
+
+      "error_label"   string => "ERROR: gem:bundler_config_file";
+
+  classes:
+      "homedir_error" not => isvariable("args[homedir]");
+      "user_error" not => isvariable("args[user]");
+      "has_mirrors" expression => isgreaterthan(length("m"), "0");
+      "args_valid"
+               and => {
+                        "!homedir_error",
+                        "!user_error",
+                        "mirrors_json_ok",
+                        "id_ok",
+                      };
+
+    id_ok::
+      "bundler_config_file_$(id)_error"
+                or => {
+                        "!args_valid",
+                        "class:batch_gem_bundler_config_file_$(id)_error",
+                      },
+             scope => "namespace";
+    args_valid::
+      "bundler_config_file_$(id)_repaired"
+        expression => "class:batch_gem_bundler_config_file_$(id)_repaired",
+             scope => "namespace";
+      "bundler_config_file_$(id)_kept"
+        expression => "!has_mirrors|class:batch_gem_bundler_config_file_$(id)_kept",
+             scope => "namespace";
+      "bundler_config_file_$(id)_ok"
+        expression => "!has_mirrors|class:batch_gem_bundler_config_file_$(id)_ok",
+             scope => "namespace";
+
+  methods:
+    args_valid.has_mirrors::
+      "bundler_dir_$(id)"   usebundle => file:edit_dir('{
+        "id":               "$(id)",
+        "path":             "$(bundler_dir)",
+        "owner":            "$(user)",
+        "create":           "true"
+      }');
+
+      "edit_file_$(id)"     usebundle => file:edit_file('{
+        "id":               "$(id)",
+        "path":             "$(path)",
+        "owner":            "$(user)",
+        "create":           "true",
+        "template":         "$(config.bundler_config_template)",
+        "template_data": {
+          "mirrors":        $(mirrors_json)
+        }
+      }');
+
+      "batch_$(id)"         usebundle => class:batch("gem_bundler_config_file_$(id)", '[
+        "file:edit_dir_$(id)",
+        "file:edit_file_$(id)",
+      ]');
+
+  reports:
+    !id_ok::
+      "$(error_label) failed to parse 'id' from arguments '$(argsjson)'";
+    homedir_error.id_ok::
+      "$(error_label) expected field 'homedir' for '$(id)'";
+    user_error.id_ok::
+      "$(error_label) expected field 'user' for '$(id)'";
+}

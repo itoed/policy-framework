@@ -1,0 +1,120 @@
+# MYSQL TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.daemons[mysql])",
+               };
+}
+
+bundle agent A01_config_noargs_defaultsMatch
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "assert"            usebundle => assert_string_equals(
+                              "$(mysql:config.secure_installation_module)",
+                              "$(inputs:dirs.moduledir)/mysql_secure_installation");
+}
+
+bundle agent A02_config_twoUserInfos_contentsCombined
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info1"         data => parsejson('{
+        "users": {
+          "root": {
+            "password":     "helloworld"
+          }
+        }
+      }');
+
+      "info2"         data => parsejson('{
+        "users": {
+          "git@localhost": {
+            "password":     "itworks!"
+          }
+        }
+      }');
+
+      "expected"      data => parsejson('{
+        "root": {
+          "password":     "helloworld"
+        },
+        "git@localhost": {
+          "password":     "itworks!"
+        }
+      }');
+
+  methods:
+      "config1"       usebundle => mysql:config(@(info1));
+      "config2"       usebundle => mysql:config(@(info2));
+
+      "assert"        usebundle => assert_data_equals(@(expected),
+                                                      @(mysql:config.users));
+}
+
+bundle agent A03_config_twoDatabaseInfos_contentsCombined
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info1"         data => parsejson('{
+        "databases": {
+          "gitlabhq_production": {
+            "default_character_set":  "utf8",
+            "collate":                "utf8_unicode_ci"
+            "privileges": {
+              "git@localhost":        [ "select", "lock tables", "insert", "update",
+                                      "delete", "create", "drop", "index", "alter" ]
+            }
+          }
+        }
+      }');
+
+      "info2"         data => parsejson('{
+        "databases": {
+          "test": {
+            "default_character_set":  "utf8",
+            "collate":                "utf8_unicode_ci"
+            "privileges": {
+              "test@localhost":        [ "select", "lock tables", "insert", "update",
+                                      "delete", "create", "drop", "index", "alter" ]
+            }
+          }
+        }
+      }');
+
+      "expected"      data => parsejson('{
+        "gitlabhq_production": {
+          "default_character_set":  "utf8",
+          "collate":                "utf8_unicode_ci"
+          "privileges": {
+            "git@localhost":        [ "select", "lock tables", "insert", "update",
+                                    "delete", "create", "drop", "index", "alter" ]
+          },
+        }
+        "test": {
+          "default_character_set":  "utf8",
+          "collate":                "utf8_unicode_ci"
+          "privileges": {
+            "test@localhost":        [ "select", "lock tables", "insert", "update",
+                                    "delete", "create", "drop", "index", "alter" ]
+          }
+        }
+      }');
+
+  methods:
+      "config1"       usebundle => mysql:config(@(info1));
+      "config2"       usebundle => mysql:config(@(info2));
+
+      "assert"        usebundle => assert_data_equals(@(expected),
+                                                      @(mysql:config.databases));
+}

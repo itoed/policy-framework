@@ -1,0 +1,479 @@
+# SETUP TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:dirs.inputdir)/setup.cf",
+               };
+}
+
+bundle agent 01_dispatch_withBadInfo_classInfoBundleErrorIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config"
+            "info_bundles":     [ "test:bad_info" ]
+          }
+        }
+      }');
+
+  methods:
+      "verify_info_vars"    usebundle => setup:dispatch(@(policy_data));
+      "assert"              usebundle => assert_class("setup:info_bundle_error");
+}
+
+bundle agent 02_dispatch_withNoInfo_classEmptyInfoVarAppliedIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"    usebundle => setup:dispatch(@(policy_data));
+      "assert"      usebundle => assert_class("xtest:empty_info_var_applied");
+}
+
+bundle agent 03_dispatch_withXTestInfo_xvalueEqualsX
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config",
+            "info_bundles":     [ "test:xtest_info" ]
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"    usebundle => setup:dispatch(@(policy_data));
+      "assert"      usebundle => assert_string_equals("X", "$(xtest:config.xvalue)");
+}
+
+bundle agent 04_dispatch_xtestThenYtest_xyvalueEqualsXThenY
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config",
+            "info_bundles":     [ "test:xtest_info" ]
+          },
+          "ytest": {
+            "config_bundle":    "ytest:config"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_string_equals("X, then Y",
+                                    "$(ytest:config.xyvalue)");
+}
+
+bundle agent 05_dispatch_xtestThenYtest_ytestConfigXvalueEqualsX
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config",
+            "info_bundles":     [ "test:xtest_info" ]
+          },
+          "ytest": {
+            "config_bundle":    "ytest:config",
+            "info_bundles":     [ "test:ytest_info" ]
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_string_equals("X", "$(ytest:config.xvalue)");
+}
+
+bundle agent 06_dispatch_xtestValidate_classXtestInitializationOkIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest" ],
+        "bundles": {
+          "xtest" :  {
+            "validation_bundle":  "xtest:validate"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("xtest:validation_ok");
+}
+
+bundle agent 07_dispatch_ytestValidate_classSetupInitializationErrorIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "ytest" ],
+        "bundles": {
+          "ytest" :  {
+            "validation_bundle":  "ytest:validate"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("setup:validation_error");
+}
+
+bundle agent 08_dispatch_xtestValidateAndYtestValidate_classSetupValidationErrorIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest" :  {
+            "validation_bundle":  "xtest:validate"
+          },
+          "ytest" :  {
+            "validation_bundle":  "ytest:validate"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("setup:validation_error");
+}
+
+bundle agent 09_dispatch_xtestAndZtestValidate_classSetupInitializationOkIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ztest" ],
+        "bundles": {
+          "xtest" :  {
+            "validation_bundle":  "xtest:validate"
+          },
+          "ztest" :  {
+            "validation_bundle":  "ztest:validate"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("setup:initialization_ok");
+}
+
+bundle agent 10_dispatch_noValidators_classSetupInitializationOkIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("setup:initialization_ok");
+}
+
+bundle agent 11_dispatch_xtestControlThenYtestControl_classYtestFoundXIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest" :  {
+            "control_bundle":  "xtest:control"
+          },
+          "ytest" :  {
+            "control_bundle":  "ytest:control"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("ytest:found_x");
+}
+
+bundle agent 12_dispatch_yTestPreControl_classYtestFoundYPreControlIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "ytest" :  {
+            "control_bundle":       "ytest:control",
+            "pre_control_bundles":  [ "test:y_pre_control" ]
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("ytest:found_y_pre_control");
+}
+
+bundle agent 13_dispatch_yTestPostControl_classYPostControlFoundYIsSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "ytest" ],
+        "bundles": {
+          "ytest" :  {
+            "control_bundle":       "ytest:control",
+            "post_control_bundles":  [ "test:y_post_control" ]
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_class("test:y_post_control_found_y");
+}
+
+bundle agent 14_dispatch_xtestThenYtest_xyvalueEqualsY
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"    data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest": {
+            "config_bundle":    "xtest:config",
+            "info_bundles":     [ "test:xtest_info" ]
+          },
+          "ytest": {
+            "config_bundle":    "ytest:config",
+            "info_bundles":     [ "test:ytest_info" ]
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_string_equals("Y", "$(ytest:config.yvalue)");
+}
+
+bundle agent 15_dispatch_xtestValidateAndYtestValidate_classSetupInitializationOkIsNotSet
+{
+  meta:
+      "tags"          slist => { "test" };
+
+  vars:
+      "policy_data"     data => parsejson('{
+        "namespaces":         [ "xtest", "ytest" ],
+        "bundles": {
+          "xtest" :  {
+            "validation_bundle":  "xtest:validate"
+          },
+          "ytest" :  {
+            "validation_bundle":  "ytest:validate"
+          }
+        }
+      }');
+
+  methods:
+      "dispatch"      usebundle => setup:dispatch(@(policy_data));
+      "assert"        usebundle => assert_not_class("setup:initialization_ok");
+}
+
+##########################################################
+#
+#     Info bundles
+#
+##########################################################
+
+bundle agent bad_info
+{
+}
+
+bundle agent xtest_info
+{
+  vars:
+      "info"          data => parsejson('{ "xvalue": "X" }');
+}
+
+bundle agent ytest_info
+{
+  vars:
+      "info"          data => parsejson('{
+        "ytest_xvalue":   "$(xtest:config.xvalue)",
+        "yvalue":         "Y"
+      }');
+}
+
+##########################################################
+#
+#     Pre and post control bundles
+#
+##########################################################
+
+bundle agent y_pre_control
+{
+  classes:
+      "y_pre_control_applied"
+      expression => "any",
+           scope => "namespace";
+}
+
+bundle agent y_post_control
+{
+  classes:
+      "y_post_control_found_y"
+      expression => "ytest:control_applied",
+           scope => "namespace";
+}
+
+##########################################################
+#
+#     Namespace: xtest
+#
+##########################################################
+
+body file control
+{
+  namespace => "xtest";
+}
+
+bundle agent config(info)
+{
+  vars:
+      "indices"        slist => getindices("info");
+      "xvalue"        string => "$(info[xvalue])";
+
+  classes:
+      "empty_info_var_applied"
+      expression => strcmp(length("indices"), "0"),
+           scope => "namespace";
+}
+
+bundle agent validate
+{
+  classes:
+      "validation_ok"     expression => "any",
+                               scope => "namespace";
+}
+
+bundle agent control
+{
+  classes:
+      "control_applied"
+      expression => "any",
+           scope => "namespace";
+}
+
+##########################################################
+#
+#     Namespace: ytest
+#
+##########################################################
+
+body file control
+{
+  namespace => "ytest";
+}
+
+bundle agent config(info)
+{
+  vars:
+      "xvalue"          string => "$(info[ytest_xvalue])";
+      "yvalue"          string => "$(info[yvalue])";
+      "xyvalue"         string => "$(xtest:config.xvalue), then Y";
+}
+
+bundle agent validate
+{
+}
+
+bundle agent control
+{
+  classes:
+      "control_applied"
+      expression => "any",
+           scope => "namespace";
+
+      "found_x"
+      expression => "xtest:control_applied",
+           scope => "namespace";
+
+      "found_y_pre_control"
+      expression => "test:y_pre_control_applied",
+           scope => "namespace";
+}
+
+##########################################################
+#
+#     Namespace: ztest
+#
+##########################################################
+
+body file control
+{
+  namespace => "ztest";
+}
+
+bundle agent validate
+{
+  classes:
+      "validation_ok"     expression => "any",
+                               scope => "namespace";
+}

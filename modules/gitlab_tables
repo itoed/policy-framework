@@ -1,0 +1,106 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+from contextlib import closing
+from mysql.connector import errorcode
+
+import argparse
+import json
+import mysql.connector
+import shlex
+import subprocess
+import sys
+import traceback
+
+LOG_PATH = "/var/cfengine/outputs/gitlab_tables.log"
+
+class GitlabTablesException(Exception):
+    pass
+
+class Logger(object):
+    log = []
+    def write(self, data):
+        self.log.append(data)
+
+logger = Logger()
+sys.stderr = logger
+
+errors = []
+
+#
+#   Initialize flags for CFEngine classes
+#
+tables_kept = False
+tables_repaired = False
+tables_ok = False
+
+try:
+    #
+    #   Parse arguments
+    #
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dbuser", help="Username to login to MySQL")
+    parser.add_argument("dbpass", help="Password to login to MySQL")
+    args = parser.parse_args()
+
+    #
+    #   Connect to information_schema database
+    #
+    with closing(mysql.connector.connect(
+            user=args.dbuser,
+            password=args.dbpass,
+            database="information_schema")) as cnx:
+        with closing(cnx.cursor()) as cursor:
+            #
+            #   Check for tables
+            #
+            cursor.execute(
+                "SELECT COUNT(*) FROM TABLES WHERE TABLE_SCHEMA = %s",
+                ("gitlabhq_production",))
+            (table_count,) = cursor.fetchone()
+
+            tables_kept = table_count > 0
+
+    if not tables_kept:
+        with open(LOG_PATH, "a") as log:
+            #
+            #   Initialize gitlab tables
+            #
+            retval = subprocess.call(
+                shlex.split(("su git -c 'bundle exec rake gitlab:setup "
+                    "RAILS_ENV=production force=yes'")),
+                cwd="/home/git/gitlab",
+                stdout=log,
+                stderr=log)
+            if retval == 0:
+                tables_repaired = True
+            else:
+                errors.append("Failed to initialize tables. See " + LOG_PATH)
+    tables_ok = tables_kept or tables_repaired
+
+except mysql.connector.Error as e:
+    if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+        errors.append("Database username or password incorrect")
+    else:
+        errors.extend(traceback.format_exc().split("\n"))
+except GitlabTablesException as e:
+    errors.append(str(e))
+except Exception as e:
+    errors.extend(traceback.format_exc().split("\n"))
+except SystemExit as e:
+    errors.extend(logger.log)
+
+#
+#   Print CFEngine classes
+#
+if tables_ok:
+    print("+tables_ok")
+    if tables_repaired:
+        print("+tables_repaired")
+    if tables_kept:
+        print("+tables_kept")
+else:
+    print("+tables_error")
+
+if errors:
+    print("%errors=" + json.dumps(errors))

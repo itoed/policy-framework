@@ -1,0 +1,686 @@
+# NEXUS CLIENT TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[nexus_client])",
+               };
+}
+
+bundle agent A01_config_noCurlPath_curlEqualsDefaultCurlPath
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "assert"        usebundle => assert_string_equals(
+                                    "$(nexus_client:knowledge.default_curl_path)",
+                                    "$(nexus_client:config.curl)");
+}
+
+bundle agent A02_config_curlPathEqualsX_curlEqualsX
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "curl_path":      "X"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "assert"        usebundle => assert_string_equals("X",
+                                    "$(nexus_client:config.curl)");
+}
+
+bundle agent A03_config_noNetrcPath_netrcEqualsDefaultNetrcPath
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "assert"        usebundle => assert_string_equals(
+                                    "$(nexus_client:knowledge.default_netrc_path)",
+                                    "$(nexus_client:config.netrc)");
+}
+
+bundle agent A04_config_netrcPathEqualsX_netrcEqualsX
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "netrc_path":      "X"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "assert"        usebundle => assert_string_equals("X",
+                                    "$(nexus_client:config.netrc)");
+}
+
+bundle agent B01_validate_passwordIsMissing_classValidationOkIsNotSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "hostname":     "nexus.local",
+        "username":     "tester"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "assert"        usebundle => assert_not_class("nexus_client:validation_ok");
+}
+
+bundle agent B02_validate_usernameIsMissing_classValidationOkIsNotSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "hostname":     "nexus.local",
+        "password":     "abc123"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "assert"        usebundle => assert_not_class("nexus_client:validation_ok");
+}
+
+bundle agent B03_validate_hostnameIsMissing_classValidationOkIsNotSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "username":     "tester",
+        "password":     "abc123"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "assert"        usebundle => assert_not_class("nexus_client:validation_ok");
+}
+
+bundle agent B04_validate_emptyInfo_classValidationOkIsNotSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "assert"        usebundle => assert_not_class("nexus_client:validation_ok");
+}
+
+bundle agent B05_validate_hasUserPassAndHostname_classValidationOkIsSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  vars:
+      "info"        data => parsejson('{
+        "username":     "tester",
+        "hostname":     "nexus.local",
+        "password":     "abc123"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "assert"        usebundle => assert_class("nexus_client:validation_ok");
+}
+
+bundle agent C01_netrcFile_invalidConfig_fileNotCreated
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "netrc_path":      "$(knowledge.tmp_dir)/.netrc"
+      }');
+
+      "expected"
+      string => "hello";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "netrc"         usebundle => nexus_client:netrc_file;
+      "assert"        usebundle => assert_not_file("$(nexus_client:config.netrc)");
+}
+
+bundle agent C02_netrcFile_validConfig_fileContentsAsExpected
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "hostname"        string => "nexus.local";
+      "login"           string => "tester";
+      "password"        string => "abc123";
+
+      "info"              data => parsejson('{
+        "netrc_path":       "$(knowledge.tmp_dir)/.netrc",
+        "netrc_owner":      "$(knowledge.env_user)",
+        "netrc_group":      "$(knowledge.env_user)",
+        "hostname":         "$(hostname)",
+        "username":         "$(login)",
+        "password":         "$(password)"
+      }');
+
+      "line1"           string => "machine $(hostname)$(const.n)";
+      "line2"           string => "login $(login)$(const.n)";
+      "line3"           string => "password $(password)";
+      "expected"        string => "$(line1)$(line2)$(line3)";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "netrc"         usebundle => nexus_client:netrc_file;
+      "assert"        usebundle => assert_file_contents("$(expected)",
+                                    "$(nexus_client:config.netrc)");
+}
+
+bundle agent C03_netrcFile_validConfig_filePermsEqual600
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "hostname"        string => "nexus.local";
+      "login"           string => "tester";
+      "password"        string => "abc123";
+
+      "info"              data => parsejson('{
+        "netrc_path":       "$(knowledge.tmp_dir)/.netrc",
+        "netrc_owner":      "$(knowledge.env_user)",
+        "netrc_group":      "$(knowledge.env_user)",
+        "hostname":         "$(hostname)",
+        "username":         "$(login)",
+        "password":         "$(password)"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "netrc"         usebundle => nexus_client:netrc_file;
+      "assert"        usebundle => assert_file_perms("600",
+                                    "$(nexus_client:config.netrc)");
+}
+
+bundle agent C04_netrcFile_existingFileWithWrongPermissions_permissionsRepaired
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/.netrc";
+      "hostname"        string => "nexus.local";
+      "login"           string => "tester";
+      "password"        string => "abc123";
+
+      "contents"         slist => {
+                                    "machine $(hostname)",
+                                    "login $(login)",
+                                    "password $(password)"
+                                  };
+
+      "info"              data => parsejson('{
+        "netrc_path":       "$(path)",
+        "netrc_owner":      "$(knowledge.env_user)",
+        "netrc_group":      "$(knowledge.env_user)",
+        "hostname":         "$(hostname)",
+        "username":         "$(login)",
+        "password":         "$(password)"
+      }');
+
+  files:
+      "$(path)"
+         create => "true",
+          perms => default:m("666"),
+      edit_line => default:insert_lines(@(contents));
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+      "validate"      usebundle => nexus_client:validate;
+      "netrc"         usebundle => nexus_client:netrc_file;
+      "assert"        usebundle => assert_file_perms("600",
+                                    "$(nexus_client:config.netrc)");
+}
+
+bundle agent D01_download_validArgs_curlCommandStringMatches
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "env_user"        string => "$(knowledge.env_user)";
+      "output_file"     string => "$(knowledge.tmp_dir)/widget-1.tar.gz";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success",
+        "hostname":       "nexus.local"
+      }');
+
+      "expected"        string => concat("-sS -f -L --netrc -o $(output_file) ",
+                          "http://nexus.local/service/local/artifact/maven/redirect",
+                          "?r=widget-repo&g=com.example&a=widget&v=1&p=tar.gz");
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "group":          "$(env_user)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(expected)", "$(output_file)");
+}
+
+bundle agent D02_download_validArgsWithPermsMode_outputFilePermsEqual644
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "env_user"        string => "$(knowledge.env_user)";
+      "output_file"     string => "$(knowledge.tmp_dir)/widget-1.tar.gz";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success",
+        "hostname":       "nexus.local"
+      }');
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "output_file":    "$(output_file)",
+        "mode":           "644",
+        "owner":          "$(env_user)",
+        "group":          "$(env_user)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "assert"        usebundle => assert_file_perms("644", "$(output_file)");
+}
+
+bundle agent D03_download_targetIsWidget1_repairedClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "env_user"        string => "$(knowledge.env_user)";
+      "output_file"     string => "$(knowledge.tmp_dir)/widget-1.tar.gz";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success",
+        "hostname":       "nexus.local"
+      }');
+
+      "id"              string => "test";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "group":          "$(env_user)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "repaired"      usebundle => assert_class("nexus_client:download_$(id)_repaired");
+      "ok"            usebundle => assert_class("nexus_client:download_$(id)_ok");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_error"     usebundle => assert_not_class("nexus_client:download_$(id)_error");
+}
+
+bundle agent D04_download_curlReturnsError_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "output_file"     string => "$(knowledge.tmp_dir)/widget-2.tar.gz";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-error"
+      }');
+
+      "id"              string => "test";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D05_download_fileExistsWithCorrectPerms_keptClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "output_file"     string => "$(knowledge.tmp_dir)/widget-3.tar.gz";
+      "env_user"        string => "$(knowledge.env_user)";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success"
+      }');
+
+      "id"              string => "test";
+
+  files:
+      "$(output_file)"
+      create => "true";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "group":          "$(env_user)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "kept"          usebundle => assert_class("nexus_client:download_$(id)_kept");
+      "ok"            usebundle => assert_class("nexus_client:download_$(id)_ok");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_error"     usebundle => assert_not_class("nexus_client:download_$(id)_error");
+}
+
+bundle agent D06_download_emptyArgs_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test" };
+
+  classes:
+      "has_classes"
+      expression => classmatch("maven:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "download"      usebundle => nexus_client:download('{}');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:has_classes");
+}
+
+bundle agent D07_download_argsMissingRepository_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "output_file"     string => "$(knowledge.tmp_dir)/widget.tar.gz";
+      "env_user"        string => "$(knowledge.env_user)";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success"
+        "hostname":       "nexus.local"
+      }');
+
+      "id"              string => "test";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D08_download_argsMissingGAVP_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "output_file"     string => "$(knowledge.tmp_dir)/widget.tar.gz";
+      "env_user"        string => "$(knowledge.env_user)";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success"
+        "hostname":       "nexus.local"
+      }');
+
+      "id"              string => "test";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "repo":           "widget-repo"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D09_download_permsModeInvalid_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "output_file"     string => "$(knowledge.tmp_dir)/widget.tar.gz";
+      "env_user"        string => "$(knowledge.env_user)";
+
+      "info"              data => parsejson('{
+        "curl_path":      "$(knowledge.mocks_dir)/curl-success"
+        "hostname":       "nexus.local"
+      }');
+
+      "id"              string => "test";
+
+  methods:
+      "config"        usebundle => nexus_client:config(@(info));
+
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(output_file)",
+        "owner":          "$(env_user)",
+        "mode":           "75",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D10_download_ownerDoesNotExist_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "id"              string => "test";
+
+  methods:
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(knowledge.tmp_dir)/widget.tar.gz",
+        "owner":          "bugs_bunny_78",
+        "group":          "$(knowledge.env_user)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D11_download_groupDoesNotExist_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "id"              string => "test";
+
+  methods:
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(knowledge.tmp_dir)/widget.tar.gz",
+        "owner":          "$(knowledge.env_user)",
+        "group":          "bugs_bunny_78",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D12_download_parentDirectoryDoesNotExist_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "id"              string => "test";
+
+  methods:
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(knowledge.tmp_dir)/nonexistent/widget.tar.gz",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}
+
+bundle agent D13_download_outputFileIsAnExistingDirectory_errorClassIsSet
+{
+  meta:
+      "tags"              slist => { "test", "tmpdir" };
+
+  vars:
+      "id"              string => "test";
+
+  methods:
+      "download"      usebundle => nexus_client:download('{
+        "id":             "$(id)",
+        "output_file":    "$(knowledge.tmp_dir)",
+        "repo":           "widget-repo",
+        "group_id":       "com.example",
+        "artifact_id":    "widget",
+        "version":        "1",
+        "packaging":      "tar.gz"
+      }');
+
+      "error"         usebundle => assert_class("nexus_client:download_$(id)_error");
+      "not_kept"      usebundle => assert_not_class("nexus_client:download_$(id)_kept");
+      "not_repaired"  usebundle => assert_not_class("nexus_client:download_$(id)_repaired");
+      "not_ok"        usebundle => assert_not_class("nexus_client:download_$(id)_ok");
+}

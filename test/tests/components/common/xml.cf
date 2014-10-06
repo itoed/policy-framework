@@ -1,0 +1,160 @@
+# XML TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[xml])",
+               };
+}
+
+bundle agent A01_findXpath_callTwiceWithTwoMatches_bothMatchesFound
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/groceries.xml";
+
+      "lines"            slist => {
+                                    "<groceries>",
+                                    "  <list>",
+                                    "    <first>Apples</first>",
+                                    "    <second>Bananas</second>",
+                                    "  </list>",
+                                    "</groceries>",
+                                  };
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => insert_lines(@(lines));
+
+  methods:
+      "find_xpath1"     usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/first/text()"),
+                        useresult => "xpath1";
+
+      "find_xpath2"     usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/second/text()"),
+                        useresult => "xpath2";
+
+      "assert1"         usebundle => assert_string_equals("Apples", "$(xpath1[result])");
+      "assert2"         usebundle => assert_string_equals("Bananas", "$(xpath2[result])");
+}
+
+bundle agent A02_findXpath_exprHasNoMatch_resultIsEmptyString
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/groceries.xml";
+
+      "lines"            slist => {
+                                    "<groceries>",
+                                    "  <list>",
+                                    "    <first>Apples</first>",
+                                    "    <second>Bananas</second>",
+                                    "  </list>",
+                                    "</groceries>",
+                                  };
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => insert_lines(@(lines));
+
+  methods:
+      "find_xpath"      usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/third/text()"),
+                        useresult => "xpath";
+
+      "assert"          usebundle => assert_string_equals("", "$(xpath[result])");
+}
+
+bundle agent A03_findXpath_fileIsNonExistent_resultIsEmptyString
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  vars:
+      "path"            string => "/tmp/not-a-file";
+
+  methods:
+      "find_xpath"      usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/first/text()"),
+                        useresult => "xpath";
+
+      "assert"          usebundle => assert_string_equals("", "$(xpath[result])");
+}
+
+bundle agent A04_findXpath_exprHasMatch_classFoundIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/groceries.xml";
+
+      "lines"            slist => {
+                                    "<groceries>",
+                                    "  <list>",
+                                    "    <first>Apples</first>",
+                                    "    <second>Bananas</second>",
+                                    "  </list>",
+                                    "</groceries>",
+                                  };
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => insert_lines(@(lines));
+
+  methods:
+      "find_xpath"                usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/first/text()"),
+                                  useresult => "xpath";
+
+      "assert_found_set"          usebundle => assert_class("$(xpath[found])");
+      "assert_not_found_not_set"  usebundle => assert_not_class("$(xpath[not_found])");
+}
+
+bundle agent A05_findXpath_exprHasNoMatch_classNotFoundIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/groceries.xml";
+
+      "lines"            slist => {
+                                    "<groceries>",
+                                    "  <list>",
+                                    "    <first>Apples</first>",
+                                    "    <second>Bananas</second>",
+                                    "  </list>",
+                                    "</groceries>",
+                                  };
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => insert_lines(@(lines));
+
+  methods:
+      "find_xpath"      usebundle => xml:find_xpath("$(path)",
+                                                    "/groceries/list/third/text()"),
+                        useresult => "xpath";
+
+      "assert_not_found_set"  usebundle => assert_class("$(xpath[not_found])");
+      "assert_found_not_set"  usebundle => assert_not_class("$(xpath[found])");
+}
+
+bundle edit_line insert_lines(lines)
+{
+  insert_lines:
+      "$(lines)";
+}

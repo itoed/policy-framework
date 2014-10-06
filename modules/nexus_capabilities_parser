@@ -1,0 +1,120 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import hashlib
+import json
+import sys
+
+REPOSITORY_TYPES = [ "rpms" ]
+
+class Capability(object):
+    def __init__(self):
+        self.version = None
+        self.type_id = None
+        self.properties = {}
+
+    @property
+    def cap_id(self):
+        data = {}
+        data["version"] = self.version
+        data["typeId"] = self.type_id
+        data["properties"] = self.properties
+        return hashlib.sha256(json.dumps(data, sort_keys=True)).hexdigest()[:13]
+
+    @property
+    def data(self):
+        data = {}
+        data["id"] = self.cap_id
+        data["version"] = self.version
+        data["typeId"] = self.type_id
+        data["properties"] = [ { "key": k, "value": v }
+                               for k, v in
+                               self.properties.iteritems() ]
+        return data
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.errors = []
+        self.caps = []
+
+    def parse(self, args):
+        if len(args) != 2:
+            self.errors.append(("Module nexus_capabilities_parser must be "
+                "invoked with exactly one argument: A JSON representation "
+                "of repositories"))
+            return
+
+        try:
+             repo_args = json.loads(args[1])
+        except ValueError as e:
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        # Ensure arguments are a dictionary
+        if type(repo_args) != dict:
+            self.errors.append(
+                ("Module nexus_capabilities_parser is expected to be "
+                 "invoked with a JSON dictionary but received '{0}'"
+                ).format(args))
+            return
+
+        #
+        # Parse repositories
+        #
+        for repo_id, repo_arg in repo_args.iteritems():
+            if type(repo_arg) != dict:
+                self.errors.append(
+                    ("Repository '{0}' is expected to be defined as an object "
+                     "but received '{1}'"
+                    ).format(repo_id, repo_arg))
+                continue
+
+            if "type" in repo_arg:
+                repo_type = repo_arg["type"]
+                if repo_type not in REPOSITORY_TYPES:
+                    self.errors.append(
+                        ("Repository '{0}' was defined with an undefined "
+                         "value for key 'type': '{1}'"
+                        ).format(repo_id, repo_type))
+                else:
+                    cap = Capability()
+                    cap.version = "1"
+                    cap.type_id = "yum.generate"
+                    cap.properties["repository"] = repo_id
+                    cap.properties["deleteProcessing"] = "true"
+                    cap.properties["deleteProcessingDelay"] = 10
+                    self.caps.append(cap)
+
+def main():
+    errors = []
+
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+
+    if argparser.errors:
+        errors.extend(argparser.errors)
+    else:
+        # Add default capabilities
+        yum_cap = Capability()
+        yum_cap.version = "1"
+        yum_cap.type_id = "yum"
+        yum_cap.properties["maxNumberParallelThreads"] = 10
+
+        caps = [ yum_cap ]
+
+        # Add parsed capabilities
+        caps.extend(argparser.caps)
+
+        # Create result data
+        data = sorted([ c.data for c in caps ], key=lambda d: d["id"])
+
+    if errors:
+        print("+capabilities_parser_error")
+        print("%errors=" + json.dumps(errors))
+    else:
+        print("+capabilities_parser_ok")
+        print("%data=" + json.dumps(data, sort_keys=True))
+
+if __name__ == "__main__":
+    main()

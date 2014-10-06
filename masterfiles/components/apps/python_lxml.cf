@@ -1,0 +1,64 @@
+# PYTHON LXML
+#
+
+body file control
+{
+  namespace => "python_lxml";
+     inputs => {
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"           slist => { "config" };
+
+  vars:
+      "version"     string => "$(info[version])",
+                ifvarclass => isvariable("info[version]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"               slist => { "validation" };
+
+  vars:
+      "required_classes"   slist => classesmatching(".*", "requires=python_lxml");
+
+  classes:
+      "action_required"
+      expression => "$(required_classes)",
+           scope => "namespace";
+
+    action_required::
+      "version_error"
+             not => isvariable("python_lxml:config.version");
+
+    default:any::
+      "validation_ok"
+      expression => "!version_error",
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected field 'version'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  methods:
+    action_required::
+      "yum_addupdate"         usebundle => package:yum_addupdate('{
+        "name":               "python-lxml",
+        "version":            "$(config.version)"
+      }');
+
+  reports:
+    !action_required::
+      "No action required";
+}

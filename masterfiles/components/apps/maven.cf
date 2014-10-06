@@ -1,0 +1,338 @@
+# MAVEN
+#
+
+body file control
+{
+  namespace => "maven";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"         slist => { "config" };
+
+  vars:
+      "version"             string => "$(info[version])",
+                        ifvarclass => isvariable("info[version]");
+
+      "release"             string => "$(info[release])",
+                        ifvarclass => isvariable("info[release]");
+
+      "compat"                data => mergedata("info[compat]"),
+                        ifvarclass => isvariable("info[compat]");
+
+      "basedir"             string => "/usr/local/apache-maven";
+
+      "homedir"             string => "$(basedir)/apache-maven-$(version)",
+                        ifvarclass => isvariable("version");
+
+      "mirrors"               data => parsejson('{}'),
+                        ifvarclass => not(isvariable("mirrors"));
+      "mirrors"               data => mergedata("info[mirrors]"),
+                        ifvarclass => isvariable("info[mirrors]");
+
+      "servers"               data => parsejson('{}'),
+                        ifvarclass => not(isvariable("servers"));
+      "servers"               data => mergedata("info[servers]"),
+                        ifvarclass => isvariable("info[servers]");
+
+      "settings"              data => mergedata("info[settings]"),
+                        ifvarclass => isvariable("info[settings]");
+
+      # Templates
+      "templatedir"       string => "$(inputs:dirs.templatedir)/apps/maven";
+      "settings_xml_template"
+                          string => "$(templatedir)/settings.xml";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"         slist => { "validation" };
+
+  classes:
+      "version_error"        not => isvariable("maven:config.version");
+      "release_error"        not => isvariable("maven:config.release");
+
+      "validation_ok"
+             and => { "!version_error", "!release_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Package version field is missing";
+    release_error::
+      "ERROR: Package release field is missing";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"         slist => { "control" };
+
+  vars:
+      "settings"                string => format('{
+        "mirrors":              %S,
+        "servers":              %S
+      }', "maven:config.mirrors", "maven:config.servers");
+
+  classes:
+      "error" expression => "class:batch_maven_error", scope => "namespace";
+      "repaired" expression => "class:batch_maven_repaired", scope => "namespace";
+      "kept" expression => "class:batch_maven_kept", scope => "namespace";
+      "ok" expression => "class:batch_maven_ok", scope => "namespace";
+
+  methods:
+      "maven_package"       usebundle => package:yum_addupdate('{
+        "name":             "maven",
+        "version":          "$(config.version)-$(config.release)",
+        "arch":             "noarch"
+      }');
+
+      "settings_xml"        usebundle => settings_xml('{
+        "id":               "global",
+        "user":             "root",
+        "m2dir":            "$(config.homedir)/conf",
+        "settings":         $(settings)
+      }');
+
+      "maven_compat"        usebundle => maven_compat;
+
+      "batch"               usebundle => class:batch("maven", '[
+        "package:yum_addupdate_maven",
+        "maven:settings_xml_global",
+        "maven:maven_compat",
+      ]');
+}
+
+bundle agent maven_compat
+{
+  vars:
+      "compat_homedir"      string => concat("$(config.basedir)/apache-maven-",
+                                        "$(config.compat[version])/conf");
+
+      "settings"            string => format('{
+        "mirrors":        %S,
+        "servers":        %S
+      }', "maven:config.mirrors", "maven:config.servers");
+
+  classes:
+      "has_compat" expression => isvariable("maven:config.compat");
+
+      "maven_compat_error"
+        expression => "class:batch_maven_compat_error",
+             scope => "namespace";
+      "maven_compat_repaired"
+        expression => "class:batch_maven_compat_repaired",
+             scope => "namespace";
+      "maven_compat_kept"
+        expression => "!has_compat|class:batch_maven_compat_kept",
+             scope => "namespace";
+      "maven_compat_ok"
+        expression => "!has_compat|class:batch_maven_compat_ok",
+             scope => "namespace";
+
+  methods:
+    has_compat::
+      "package"               usebundle => package:yum_addupdate('{
+        "id":                 "maven_compat",
+        "name":               "$(config.compat[name])",
+        "version":            "$(config.compat[version])-$(config.compat[release])",
+        "arch":               "noarch"
+      }');
+
+    package:yum_addupdate_maven_compat_ok::
+      "settings_xml"          usebundle => settings_xml('{
+        "id":                 "maven_compat",
+        "user":               "root",
+        "m2dir":              "$(compat_homedir)",
+        "settings":           $(settings)
+      }');
+
+    has_compat::
+      "batch"                     usebundle => class:batch("maven_compat", '[
+        "package:yum_addupdate_maven_compat",
+        "maven:settings_xml_maven_compat",
+      ]');
+}
+
+#
+#   Common bundle for settings.xml files, including the global
+#   $M2_HOME/conf/settings.xml file and local $HOME/.m2/settings.xml files
+#
+bundle agent settings_xml(argsjson)
+{
+  vars:
+      "args"                  data => parsejson("$(argsjson)"),
+                           classes => class:local("args");
+
+      "m2dir"               string => "$(args[m2dir])",
+                        ifvarclass => isvariable("args[m2dir]"),
+                           classes => class:local("m2dir");
+
+      "user"                string => "$(args[user])",
+                        ifvarclass => isvariable("args[user]"),
+                           classes => class:local("user");
+
+      "id"                  string => canonify("$(user)"),
+                        ifvarclass => not(isvariable("args[id]")),
+                           classes => class:local("id");
+      "id"                  string => canonify("$(args[id])"),
+                        ifvarclass => isvariable("args[id]"),
+                           classes => class:local("id");
+
+      "settings"              data => parsejson('{}');
+      "settings"              data => mergedata("args[settings]");
+
+      # Parse mirrors
+      "m"                    slist => getindices("settings[mirrors]");
+      "m_json"               slist => maplist('{
+        "id":                 "$(this)",
+        "mirrorOf":           "$(settings[mirrors][$(this)][mirrorOf])",
+        "url":                "$(settings[mirrors][$(this)][url])"
+        "name":               "$(settings[mirrors][$(this)][name])"
+      }', "m");
+
+      "mirrors_json"        string => '[]',
+                        ifvarclass => strcmp(length("m"), "0"),
+                           classes => class:local("mirrors_json");
+      "mirrors_json"        string => format('[ %s ]', join(", ", "m_json")),
+                        ifvarclass => isgreaterthan(length("m"), "0"),
+                           classes => class:local("mirrors_json");
+      # Parse servers
+      "s"                    slist => getindices("settings[servers]");
+      "s_json"               slist => maplist('{
+        "id":                 "$(this)",
+        "username":           "$(settings[servers][$(this)][username])",
+        "password":           "$(settings[servers][$(this)][password])"
+      }', "s");
+
+      "servers_json"        string => '[]',
+                        ifvarclass => strcmp(length("s"), "0"),
+                           classes => class:local("servers_json");
+      "servers_json"        string => format('[ %s ]', join(", ", "s_json")),
+                        ifvarclass => isgreaterthan(length("s"), "0"),
+                           classes => class:local("servers_json");
+      # Parse profiles
+      "p"                    slist => getindices("settings[profiles]");
+      "keys[$(p)]"           slist => getindices("settings[profiles][$(p)]");
+      "json[$(p)]"           slist => {};
+      "json[$(p)]"           slist => maplist('{
+        "key":                "$(this)",
+        "value":              "$(settings[profiles][$(p)][$(this)])"
+      }', "keys[$(p)]");
+
+      "props[$(p)]"         string => format('[ %s ]', join(", ", "json[$(p)]"));
+
+      "p_json"               slist => maplist('{
+        "id":                 "$(this)",
+        "properties":         $(props[$(this)])
+      }', "p");
+
+      "profiles_json"       string => '[]',
+                        ifvarclass => strcmp(length("p"), "0"),
+                           classes => class:local("profiles_json");
+      "profiles_json"       string => format('[ %s ]', join(", ", "p_json")),
+                        ifvarclass => isgreaterthan(length("p"), "0"),
+                           classes => class:local("profiles_json");
+
+  classes:
+      "mirror_name_$(m)_error" not => isvariable("settings[mirrors][$(m)][name]");
+      "mirror_of_$(m)_error" not => isvariable("settings[mirrors][$(m)][mirrorOf]");
+      "mirror_url_$(m)_error" not => isvariable("settings[mirrors][$(m)][url]");
+
+      "server_username_$(s)_error" not => isvariable("settings[servers][$(s)][username]");
+      "server_password_$(s)_error" not => isvariable("settings[servers][$(s)][password]");
+
+      "args_valid"
+               and => {
+                        "args_ok",
+                        "m2dir_ok",
+                        "user_ok",
+                        "id_ok",
+                        "mirrors_json_ok",
+                        "servers_json_ok",
+                        "profiles_json_ok",
+                      };
+
+    id_ok::
+      "settings_xml_$(id)_error"
+                or => {
+                        "!args_valid",
+                        "class:batch_maven_settings_xml_$(id)_error",
+                      },
+             scope => "namespace";
+
+      "settings_xml_$(id)_repaired"
+        expression => "class:batch_maven_settings_xml_$(id)_repaired",
+             scope => "namespace";
+
+      "settings_xml_$(id)_kept"
+        expression => "class:batch_maven_settings_xml_$(id)_kept",
+             scope => "namespace";
+
+      "settings_xml_$(id)_ok"
+        expression => "class:batch_maven_settings_xml_$(id)_ok",
+             scope => "namespace";
+
+  methods:
+    args_valid::
+      "m2dir_$(id)"         usebundle => file:edit_dir('{
+        "id":               "maven_settings_xml_m2dir_$(id)",
+        "path":             "$(m2dir)",
+        "owner":            "$(user)",
+        "create":           "true"
+      }');
+
+      "edit_file_$(id)"     usebundle => file:edit_file('{
+        "id":               "maven_settings_xml_file_$(id)",
+        "path":             "$(m2dir)/settings.xml",
+        "owner":            "$(user)",
+        "mode":             "644",
+        "create":           "true",
+        "template":         "$(config.settings_xml_template)",
+        "template_data": {
+          "mirrors":        $(mirrors_json),
+          "servers":        $(servers_json),
+          "profiles":       $(profiles_json)
+        }
+      }');
+
+      "batch_$(id)"         usebundle => class:batch("maven_settings_xml_$(id)", '[
+        "file:edit_dir_maven_settings_xml_m2dir_$(id)",
+        "file:edit_file_maven_settings_xml_file_$(id)",
+      ]');
+
+  reports:
+    !args_ok::
+      "ERROR: maven:settings_xml failed to parse JSON arguments '$(argsjson)'";
+    !m2dir_ok.args_ok::
+      "ERROR: maven:settings_xml expected argument 'm2dir' for '$(id)'";
+    !user_ok.args_ok::
+      "ERROR: maven:settings_xml expected argument 'user' for '$(id)'";
+    !id_ok.args_ok::
+      "ERROR: maven:settings_xml could not resolve variable 'id'";
+    !mirrors_json_ok.args_ok::
+      "ERROR: maven:settings_xml could not parse argument 'mirrors' for '$(id)'";
+    !servers_json_ok.args_ok::
+      "ERROR: maven:settings_xml could not parse argument 'servers' for '$(id)'";
+    !profiles_json_ok.args_ok::
+      "ERROR: maven:settings_xml could not parse argument 'profiles' for '$(id)'";
+    default:any::
+      "ERROR: maven:settings_xml expected argument 'name' for mirror '$(m)' for '$(id)'"
+        ifvarclass => canonify("mirror_name_$(m)_error");
+      "ERROR: maven:settings_xml expected argument 'url' for mirror '$(m)' for '$(id)'"
+        ifvarclass => canonify("mirror_url_$(m)_error");
+      "ERROR: maven:settings_xml expected argument 'mirrorOf' for mirror '$(m)' for '$(id)'"
+        ifvarclass => canonify("mirror_of_$(m)_error");
+      "ERROR: maven:settings_xml expected argument 'username' for server '$(s)' for '$(id)'"
+        ifvarclass => canonify("server_username_$(s)_error");
+      "ERROR: maven:settings_xml expected argument 'password' for server '$(s)' for '$(id)'"
+        ifvarclass => canonify("server_password_$(s)_error");
+}

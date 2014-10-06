@@ -1,0 +1,396 @@
+# SETUP
+#
+# Changelog
+#
+# Fri Aug 8 2014 Eduardo Ito
+#
+# Run all config bundles before validation bundles.
+#
+# This allows bundles to be validated based on the configuration of previous bundles.
+# The motivation for this is the need to have optional dependencies for Nexus --
+# createrepo, shiro_hasher, and python_lxml -- be validated (e.g. package version
+# present) based on whether the policy makes use of those features, while still
+# having those components as inputs, and then allow the control bundles of those
+# components decide if action is required.
+#
+# Ideally those inputs should be optional, but the logic required for that,
+# i.e. bundlesmatching and variablesmatching, cannot be done before inputs are
+# evaluated to a list variable.
+#
+# Alternatively, the policy could be responsible for declaring those inputs,
+# but then a component file such as nexus.cf would not self-document all of its
+# dependencies.
+#
+# Another alternative would be to have the policy declare a class to instruct the
+# component file to load those inputs, but that would add redundancy to the policy
+# to declare both an info bundle for the dependency and a class requesting it as
+# an input.
+#
+# Another alternative would be to have the components check if an info variable exists
+# in a bundle in the policy, since the function isvariable is evaluated before inputs
+# but that would eliminate the ability create archetypes in the future.
+#
+# The drawbacks are that now config bundles cannot use validation results, and also
+# that files which are not required are declared as inputs and processed, although
+# if a component needs to invoke a bundle on another component based on a condition,
+# the input has to be declared whether or not the condition is met.
+#
+
+body file control
+{
+  namespace => "setup";
+}
+
+bundle agent run
+{
+  methods:
+      "input_scanner"
+      usebundle => input_scanner;
+
+      "json_input_converter"
+      usebundle => json_input_converter(@(input_scanner.results));
+
+      "input_processor"
+      usebundle => input_processor("$(json_input_converter.results)");
+
+      "dispatch"
+      usebundle => dispatch(@(input_processor.policy_data));
+}
+
+bundle agent input_scanner
+{
+  vars:
+      #
+      # Scan input files for variables and bundles with metadata
+      #
+      "policy_inputs[dependency_vars]"
+      slist => variablesmatching(".*", "dependencies");
+
+      "policy_inputs[namespace_bundles]"
+      slist => bundlesmatching(".*", "(config|validation|control)");
+
+      "policy_inputs[extension_bundles]"
+      slist => bundlesmatching(".*", "(info|pre_control|post_control)=.*");
+
+      "results"           data => mergedata("policy_inputs");
+}
+
+bundle agent json_input_converter(policy_inputs)
+{
+  vars:
+      "dependency_vars"    slist => getvalues("policy_inputs[dependency_vars]");
+      "namespace_bundles"  slist => getvalues("policy_inputs[namespace_bundles]");
+      "extension_bundles"  slist => getvalues("policy_inputs[extension_bundles]");
+
+      #
+      # Map meta variables to values and meta bundles to tags
+      #
+      "dependency_var_values[$(dependency_vars)]"
+      slist => { "@($(dependency_vars))" };
+
+      "namespace_bundle_tags[$(namespace_bundles)]"
+      slist => { "@($(namespace_bundles)_meta.tags)" };     
+
+      "extension_bundle_tags[$(extension_bundles)]"
+      slist => { "@($(extension_bundles)_meta.tags)" };
+
+      # Arrays of lists must be converted to data container,
+      # otherwise they cannot be used with format %S
+      "dependency_var_data"       data => mergedata("dependency_var_values");
+      "dependency_var_data"       data => parsejson('{}'),
+                            ifvarclass => not(isvariable("dependency_var_data"));
+
+      "namespace_bundle_data"     data => mergedata("namespace_bundle_tags");
+      "namespace_bundle_data"     data => parsejson('{}'),
+                            ifvarclass => not(isvariable("namespace_bundle_data"));
+
+      "extension_bundle_data"     data => mergedata("extension_bundle_tags");
+      "extension_bundle_data"     data => parsejson('{}'),
+                            ifvarclass => not(isvariable("extension_bundle_data"));
+
+      "input_data"                data => parsejson(format('{
+        "dependency_vars":    %s,
+        "namespace_bundles":  %s,
+        "extension_bundles":  %s
+      }', format("%S", "dependency_var_data"),
+          format("%S", "namespace_bundle_data"),
+          format("%S", "extension_bundle_data")
+      ));
+
+      "results"                 string => format("%S", "input_data");
+}
+
+bundle agent input_processor(json_params)
+{
+  vars:
+    policy_data_prepared::
+      "policy_data"               data => mergedata("prepare_policy_data.results");
+
+  classes:
+      "policy_data_prepared"
+      expression => "invoke_module_repaired",
+           scope => "namespace";
+
+  commands:
+      "$(sys.workdir)/modules/prepare_policy_data '$(json_params)'"
+      module => "true",
+      classes => local("invoke_module");
+}
+
+# Initialize all namespaces.
+#
+# Only after all namespaces have been initialized, apply the control bundles
+# for each namespace in order
+# 
+# Configuraton bundles need to be applied in order so that bundle variables
+# depending on other bundles can be resolved correctly
+# 
+bundle agent dispatch(policy_data)
+{
+  vars:
+      "ns"             slist => getvalues("policy_data[namespaces]");
+      "bundles"         data => mergedata("policy_data[bundles]");
+
+  classes:
+    verify::
+      "initialization_ok"
+             and => { "!validation_error", "!info_bundle_error" },
+           scope => "namespace";
+
+    default:any::
+      "verify"
+      expression => "default:any";
+
+  methods:
+      "config_$(ns)"
+       usebundle => config("$(ns)", "setup:$(this.bundle).bundles[$(ns)]");
+
+      "validate_$(ns)"
+       usebundle => validate("$(ns)", "setup:$(this.bundle).bundles[$(ns)]");
+
+    initialization_ok::
+      "run_pre_execution" usebundle => run_pre_execution;
+
+      "execute_$(ns)"
+       usebundle => execute("$(ns)", "setup:$(this.bundle).bundles[$(ns)]");
+
+  reports:
+    info_bundle_error::
+      "Aborting: Info bundle error";
+    validation_error::
+      "Aborting: Validation failed";
+}
+
+bundle agent config(ns, bundles_datavar)
+{
+  vars:
+      "bundles_data"          data => mergedata("$(bundles_datavar)");
+    
+      "config_bundle"       string => "$(bundles_data[config_bundle])";
+      "info_bundles"         slist => getvalues("bundles_data[info_bundles]");
+
+  classes:
+      "has_config_bundle_$(ns)"
+      expression => isvariable("bundles_data[config_bundle]");
+
+  methods:
+      "apply_config_bundle_$(ns)"
+       usebundle => apply_config_bundle("$(config_bundle)", @(info_bundles)),
+      ifvarclass => "has_config_bundle_$(ns)";
+}
+
+bundle agent validate(ns, bundles_datavar)
+{
+  vars:
+      "bundles_data"          data => mergedata("$(bundles_datavar)");
+    
+      "validation_bundle"   string => "$(bundles_data[validation_bundle])";
+
+  classes:
+      "has_validation_bundle_$(ns)"
+      expression => isvariable("bundles_data[validation_bundle]");
+
+  methods:
+      "apply_validation_bundle_$(ns)"
+       usebundle => apply_validation_bundle("$(validation_bundle)"),
+      ifvarclass => "has_validation_bundle_$(ns)";
+}
+
+bundle agent apply_config_bundle(config_bundle, info_bundles)
+{
+  vars:
+      "b"             string => canonifyuniquely("$(config_bundle)");
+      "empty_info"      data => parsejson('{}');
+
+  classes:
+      "use_empty_info_$(b)"
+      expression => strcmp(length("info_bundles"), "0");
+
+  methods:
+      "apply_$(config_bundle)_$(info_bundles)"
+       usebundle => apply_info_bundle("$(config_bundle)", "$(info_bundles)"),
+      ifvarclass => not("use_empty_info_$(b)");
+      
+      "apply_$(config_bundle)_empty"
+       usebundle => $(config_bundle)(@(empty_info)),
+      ifvarclass => "use_empty_info_$(b)";
+
+  reports:
+    default:policy_debug_mode::
+      "Applied $(config_bundle) with empty info"
+      ifvarclass => "use_empty_info_$(b)";
+}
+
+bundle agent apply_info_bundle(config_bundle, info_bundle)
+{
+  vars:
+      "id"        string => canonifyuniquely("$(config_bundle)_$(info_bundle)");
+      "info"        data => mergedata("$(info_bundle).info");
+
+  classes:
+      "has_info_var_$(id)"
+      expression => isvariable("$(info_bundle).info"),
+      ifvarclass => "running_info_bundle_$(id)";
+
+      "info_var_$(id)_error"
+             not => "has_info_var_$(id)",
+      ifvarclass => "running_info_bundle_$(id)";
+
+      "info_bundle_error"
+      expression => "info_var_$(id)_error",
+           scope => "namespace";
+
+      "running_info_bundle_$(id)"
+      expression => "default:any";
+
+  methods:
+      "run_info_bundle_$(id)"
+       usebundle => $(info_bundle);
+
+      "apply_info_bundle_$(id)"
+       usebundle => $(config_bundle)(@(info)),
+      ifvarclass => "has_info_var_$(id)";
+
+  reports:
+      "ERROR: Info bundle $(info_bundle) is missing info variable"
+      ifvarclass => "info_var_$(id)_error";
+    default:policy_debug_mode::
+      "Applied $(config_bundle) with $(info_bundle)"
+      ifvarclass => "has_info_var_$(id)";
+}
+
+bundle agent apply_validation_bundle(validation_bundle)
+{
+  vars:
+      "id"                  string => canonifyuniquely("$(validation_bundle)");
+      "name_tokens"          slist => string_split("$(validation_bundle)", ":", "2");
+      "ok_class"            string => concat(nth("name_tokens", "0"), ":",
+                                        "validation_ok");
+
+  classes:
+      "validation_$(id)_ok"
+      expression => "$(ok_class)";
+
+      "validation_$(id)_error"
+             not => "validation_$(id)_ok",
+      ifvarclass => "applying_validation_$(id)";
+
+      "validation_error"
+      expression => "validation_$(id)_error",
+           scope => "namespace";
+
+      "applying_validation_$(id)"
+      expression => "default:any";
+
+  methods:
+      "apply_$(id)"   usebundle => $(validation_bundle),
+                      useresult => "result";
+
+  reports:
+      "ERROR: Validation bundle $(validation_bundle) failed"
+      ifvarclass => "validation_$(id)_error";
+    default:policy_debug_mode::
+      "Validation bundle $(validation_bundle) passed"
+      ifvarclass => "validation_$(id)_ok";
+}
+
+bundle agent run_pre_execution
+{
+  reports:
+    default:policy_debug_mode::
+      "======================================================================"
+      handle => "run_pre_execution";
+}
+
+bundle agent execute(ns, bundles_datavar)
+{
+  vars:
+      "bundles_data"              data => mergedata("$(bundles_datavar)");
+    
+      "control_bundle"          string => "$(bundles_data[control_bundle])";
+      "pre_control_bundles"      slist => getvalues("bundles_data[pre_control_bundles]");
+      "post_control_bundles"     slist => getvalues("bundles_data[post_control_bundles]");
+
+  classes:
+      "has_control_bundle_$(ns)"
+      expression => isvariable("bundles_data[control_bundle]");
+
+  methods:
+      "apply_pre_control_bundle_$(ns)_$(pre_control_bundles)"
+       usebundle => apply_pre_control_bundle("$(pre_control_bundles)");
+
+      "apply_control_bundle_$(ns)"
+       usebundle => apply_control_bundle("$(control_bundle)"),
+      ifvarclass => "has_control_bundle_$(ns)";
+
+      "apply_post_control_bundle_$(ns)_$(post_control_bundles)"
+       usebundle => apply_post_control_bundle("$(post_control_bundles)");
+
+  reports:
+    default:policy_debug_mode::
+      "======================================================================"
+      ifvarclass => "has_control_bundle_$(ns)";
+}
+
+bundle agent apply_control_bundle(control_bundle)
+{
+  methods:
+      "apply_$(control_bundle)"
+      usebundle => $(control_bundle);
+
+  reports:
+    default:policy_debug_mode::
+      "Applied control bundle $(control_bundle)";
+}
+
+bundle agent apply_pre_control_bundle(pre_control_bundle)
+{
+  methods:
+      "apply_$(pre_control_bundle)"
+      usebundle => $(pre_control_bundle);
+
+  reports:
+    default:policy_debug_mode::
+      "Applied pre control bundle $(pre_control_bundle)";
+}
+
+bundle agent apply_post_control_bundle(post_control_bundle)
+{
+  methods:
+      "apply_$(post_control_bundle)"
+      usebundle => $(post_control_bundle);
+
+  reports:
+    default:policy_debug_mode::
+      "Applied post control bundle $(post_control_bundle)";
+}
+
+body classes local(x)
+{
+      promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+     repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+     repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+    repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+             scope => "bundle";
+}

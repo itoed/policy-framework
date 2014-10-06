@@ -1,0 +1,300 @@
+# MYSQL
+#
+# Changelog:
+#
+# Fri Jun 27 2014 Eduardo Ito
+# The version for package mysql-community-server is 5.6.19-2.el6 as it is the
+# latest GA release. When starting the service the error message
+#
+# TIMESTAMP with implicit DEFAULT value is deprecated. Please use
+# --explicit_defaults_for_timestamp server option (see documentation for more
+# details).
+#
+# was received, which is fixed by adding the option
+#
+# explicit_defaults_for_timestamp = TRUE
+#
+# to my.cnf as per
+#
+# http://dev.mysql.com/doc/refman/5.6/en/server-system-variables.html#sysvar_explicit_defaults_for_timestamp
+#
+# Fri Aug 1 2014 Eduardo Ito
+# Added promise to delete mysql-libs package (centos-6 yum repo) to stop a conflict
+# with mysql-community-server (mysql yum repo)
+#
+
+body file control
+{
+  namespace => "mysql";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+               };
+}
+
+#
+# TODO: Remove empty variables for users and databases and don't
+# call the modules using those empty variables.  The bundles that
+# call those modules should set those classes as ok without invoking
+# them instead
+#
+# Add service promise before secure installation module so it's documented
+# within this policy as opposed to in a module
+#
+bundle agent config(info)
+{
+  meta:
+      "tags"               slist => { "config" };
+
+  vars:
+      "root_password"   string => "$(info[root_password])",
+                    ifvarclass => isvariable("info[root_password]");
+
+      "users"             data => parsejson('{}'),
+                    ifvarclass => not(isvariable("users"));
+      "users"             data => mergedata("users", "info[users])"),
+                    ifvarclass => isvariable("info[users]");
+
+      "databases"         data => parsejson('{}'),
+                    ifvarclass => not(isvariable("databases"));
+      "databases"         data => mergedata("databases", "info[databases])"),
+                    ifvarclass => isvariable("info[databases]");
+
+      "templatedir"     string => "$(inputs:dirs.templatedir)/daemons/mysql";
+
+      "my_cnf_file"     string => "/etc/my.cnf";
+      "my_cnf_template" string => "$(templatedir)/my.cnf.txt";
+
+      "moduledir"       string => "$(inputs:dirs.moduledir)";
+
+      "secure_installation_module"
+                        string => "$(moduledir)/mysql_secure_installation",
+                    ifvarclass => not(isvariable("secure_installation_module"));
+      "secure_installation_module"
+                        string => "$(info[secure_installation_module])",
+                    ifvarclass => isvariable("info[secure_installation_module]");
+
+      "users_module"    string => "$(moduledir)/mysql_users",
+                    ifvarclass => not(isvariable("users_module"));
+      "users_module"    string => "$(info[users_module])",
+                    ifvarclass => isvariable("info[users_module]");
+
+      "databases_module"
+                        string => "$(moduledir)/mysql_databases",
+                    ifvarclass => not(isvariable("databases_module"));
+      "databases_module"
+                        string => "$(info[databases_module])",
+                    ifvarclass => isvariable("info[databases_module]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"           slist => { "validation" };
+
+  classes:
+      "root_password_error"
+             not => isvariable("mysql:config.root_password");
+
+      "validation_ok"
+             and => { "!root_password_error" },
+           scope => "namespace";
+
+  reports:
+    root_password_error::
+      "ERROR: Missing root password";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"               slist => { "control" };
+
+  classes:
+      "error" expression => "class:batch_mysql_error", scope => "namespace";
+      "repaired" expression => "class:batch_mysql_repaired", scope => "namespace";
+      "kept" expression => "class:batch_mysql_kept", scope => "namespace";
+      "ok" expression => "class:batch_mysql_ok", scope => "namespace";
+
+  methods:
+      "packages"              usebundle => packages;
+    packages_ok::
+      "mysql_cnf_file"        usebundle => file:copy_file('{
+        "id":                 "mysql_cnf_file",
+        "path":               "$(config.my_cnf_file)",
+        "source":             "$(config.my_cnf_template)",
+      }');
+    file:copy_file_mysql_cnf_file_ok::
+      "secure_installation"   usebundle => secure_installation;
+    secure_installation_ok::
+      "rootpasswd_file"       usebundle => file:edit_file('{
+        "id":                 "mysql_rootpasswd_file",
+        "path":               "/var/lib/mysql/rootpasswd",
+        "owner":              "mysql",
+        "contents":           [ "$(config.root_password)" ],
+        "create":             "true"
+      }');
+    
+      "users"                 usebundle => users;
+      "databases"             usebundle => databases;
+
+    default:any::
+      "batch"                 usebundle => class:batch("mysql", '[
+        "mysql:packages",
+        "file:copy_file_mysql_cnf_file",
+        "mysql:secure_installation",
+        "file:edit_file_mysql_rootpasswd_file",
+        "mysql:users",
+        "mysql:databases",
+      ]');
+
+  reports:
+    kept.default:policy_debug_mode::
+      "MySQL is as promised";
+    repaired::
+      "MySQL was repaired";
+    error::
+      "ERROR: Could not repair MySQL";
+}
+
+bundle agent packages
+{
+  classes:
+      "packages_error" expression => "class:batch_mysql_packages_error", scope => "namespace";
+      "packages_repaired" expression => "class:batch_mysql_packages_repaired", scope => "namespace";
+      "packages_kept" expression => "class:batch_mysql_packages_kept", scope => "namespace";
+      "packages_ok" expression => "class:batch_mysql_packages_ok", scope => "namespace";
+
+  methods:
+      "no_mysql_libs"             usebundle => package:yum_delete('{
+        "name":                   "mysql-libs",
+        "version":                "5.1.66-2.el6_3",
+        }');
+
+      "no_mysql_libs_digital_ocean" usebundle => package:yum_delete('{
+        "name": "mysql-libs",
+        "version": "5.1.73-3.el6_5",
+        }');
+
+      "mysql_community_server"    usebundle => package:yum_addupdate('{
+        "name":                   "mysql-community-server",
+        "version":                "5.6.19-2.el6"
+      }');
+
+      "mysql_connector_python"    usebundle => package:yum_addupdate('{
+        "name":                   "mysql-connector-python",
+        "version":                "1.1.6-1.el6",
+        "arch":                   "noarch"
+      }');
+
+      "batch"                     usebundle => class:batch("mysql_packages", '[
+        "package:yum_delete_mysql_libs",
+        "package:yum_addupdate_mysql_community_server",
+        "package:yum_addupdate_mysql_connector_python",
+      ]');
+}
+
+# NOTE: If password reset fails, MySQL will get stuck and it will not
+# be possible to start the service.  It will be necessary to kill any
+# existing process.
+#
+bundle agent secure_installation
+{
+  classes:
+      "secure_installation_error"
+      expression => "secure_installation_module_error",
+           scope => "namespace";
+
+  commands:
+      "$(config.secure_installation_module) '$(config.root_password)'"
+       module => "true",
+      classes => class:namespace("secure_installation_module");
+
+  reports:
+    default:any.default:policy_debug_mode::
+      "$(default:mysql_secure_installation.kept_promises)"
+      ifvarclass => isvariable("default:mysql_secure_installation.kept_promises");
+
+    secure_installation_kept.default:policy_debug_mode::
+      "MySQL secure installation is as promised";
+
+    default:any::
+      "* $(default:mysql_secure_installation.repairs)"
+      ifvarclass => isvariable("default:mysql_secure_installation.repairs");
+
+    secure_installation_repaired::
+      "MySQL secure installation was repaired";
+
+    default:any::
+      "ERROR: $(default:mysql_secure_installation.errors)"
+      ifvarclass => isvariable("default:mysql_secure_installation.errors");
+
+    secure_installation_error::
+      "ERROR: MySQL secure installation could not be repaired";
+}
+
+bundle agent users
+{
+  vars:
+      "users"               data => mergedata("mysql:config.users");
+      "u"                  slist => getindices("users");
+      "db[$(u)]"           slist => getindices("users[$(u)][privileges]");
+      "module_args"       string => format("'$(config.root_password)' '%S'", "users");
+
+  classes:
+      "users_error"
+      expression => "users_module_error",
+           scope => "namespace";
+
+  commands:
+      "$(config.users_module) $(module_args)"
+       module => "true",
+      classes => class:local("users_module");
+
+  reports:
+    default:policy_debug_mode::
+      "$(default:mysql_users.user_kept_messages[$(u)])"
+      ifvarclass => isvariable("default:mysql_users.user_kept_messages[$(u)]");
+    default:any::
+      "$(default:mysql_users.user_repair_messages[$(u)])"
+      ifvarclass => isvariable("default:mysql_users.user_repair_messages[$(u)]");
+      "$(default:mysql_users.user_errors[$(u)])"
+      ifvarclass => isvariable("default:mysql_users.user_errors[$(u)]");
+    default:policy_debug_mode::
+      "$(default:mysql_users.module_kept_messages)"
+      ifvarclass => isvariable("default:mysql_users.module_kept_messages");
+    default:any::
+      "$(default:mysql_users.module_repair_messages)"
+      ifvarclass => isvariable("default:mysql_users.module_repair_messages");
+      "$(default:mysql_users.module_errors)"
+      ifvarclass => isvariable("default:mysql_users.module_errors");
+}
+
+bundle agent databases
+{
+  vars:
+      "module_args"             string => format("'$(config.root_password)' '%S'",
+                                                  "mysql:config.databases");
+
+  classes:
+      "databases_error"
+      expression => "databases_module_error",
+           scope => "namespace";
+
+  commands:
+      "$(config.databases_module) $(module_args)"
+       module => "true",
+      classes => class:local("databases_module");
+
+  reports:
+    default:policy_debug_mode::
+      "$(default:mysql_databases.kept_messages)"
+      ifvarclass => isvariable("default:mysql_databases.kept_messages");
+    default:any::
+      "$(default:mysql_databases.repair_messages)"
+      ifvarclass => isvariable("default:mysql_databases.repair_messages");
+
+      "$(default:mysql_databases.errors)"
+      ifvarclass => isvariable("default:mysql_databases.errors");
+}

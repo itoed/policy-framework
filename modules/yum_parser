@@ -1,0 +1,167 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import json
+import sys
+
+class YumRepository(object):
+    def __init__(self, repo_id):
+        self.repo_id = repo_id
+        self.name = None
+        self.baseurl = None
+        self.username = None
+        self.password = None
+        self.skip_if_unavailable = False
+
+    @property
+    def data(self):
+        data = {}
+        data["repo_id"] = self.repo_id
+        data["name"] = self.name
+        data["baseurl"] = self.baseurl
+        data["skip_if_unavailable"] = self.skip_if_unavailable
+        if self.username and self.password:
+            data["credentials"] = {}
+            data["credentials"]["username"] = self.username
+            data["credentials"]["password"] = self.password
+        return data
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.errors = []
+        self.repos = []
+
+    def parse(self, args):
+        if len(args) != 2:
+            self.errors.append(("Module yum_parser must be "
+                "invoked with exactly one argument: A JSON list "
+                "of yum repository objects"))
+            return
+
+        try:
+             module_args = json.loads(args[1])
+        except ValueError as e:
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        # Ensure arguments are a JSON object
+        if type(module_args) != dict:
+            self.errors.append(
+                ("Module yum_parser is expected to be "
+                 "invoked with a JSON object but received '{0}'"
+                ).format(module_args))
+            return
+
+        #
+        # Parse repositories
+        #
+        for repo_id, repo_arg in module_args.iteritems():
+            repo = YumRepository(repo_id)
+            repo_error = False
+
+            # Parse name
+            if "name" not in repo_arg:
+                repo_error = True
+                self.errors.append(
+                    ("Yum repository object '{0}' expected key 'name'"
+                    ).format(repo_id))
+            else:
+                name_arg = repo_arg["name"]
+                if not isinstance(name_arg, basestring):
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key 'name' "
+                         " to be a string but received '{1}'"
+                        ).format(repo_id, json.dumps(name_arg)))
+                else:
+                    repo.name = name_arg
+
+            # Parse baseurl
+            if "baseurl" not in repo_arg:
+                repo_error = True
+                self.errors.append(
+                    ("Yum repository object '{0}' expects key 'baseurl'"
+                    ).format(repo_id))
+            else:
+                baseurl_arg = repo_arg["baseurl"]
+                if not isinstance(baseurl_arg, basestring):
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key "
+                         "'baseurl' to be a string but received '{1}'"
+                        ).format(repo_id, json.dumps(baseurl_arg)))
+                else:
+                    repo.baseurl = baseurl_arg
+
+            # Parse username
+            if "username" in repo_arg:
+                username_arg = repo_arg["username"]
+                if not isinstance(username_arg, basestring):
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key "
+                         "'username' to be a string but received '{1}'"
+                        ).format(repo_id, json.dumps(username_arg)))
+                else:
+                    repo.username = username_arg
+            elif "password" in repo_arg:
+                repo_error = True
+                self.errors.append(
+                    ("Yum repository object '{0}' expects key 'username'"
+                     " when key 'password' is given"
+                    ).format(repo_id))
+
+            # Parse password
+            if "password" in repo_arg:
+                password_arg = repo_arg["password"]
+                if not isinstance(password_arg, basestring):
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key "
+                         "'password' to be a string but received '{1}'"
+                        ).format(repo_id, json.dumps(password_arg)))
+                else:
+                    repo.password = password_arg
+            elif "username" in repo_arg:
+                repo_error = True
+                self.errors.append(
+                    ("Yum repository object '{0}' expects key 'password'"
+                     " when key 'username' is given"
+                    ).format(repo_id))
+
+            # Parse skip if unavailable
+            if "skip_if_unavailable" in repo_arg:
+                skip_if_unavailable_arg = repo_arg["skip_if_unavailable"]
+                if type(skip_if_unavailable_arg) != bool:
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key "
+                         "'skip_if_unavailable' to be boolean but received '{1}'"
+                        ).format(repo_id, json.dumps(skip_if_unavailable_arg)))
+                else:
+                    repo.skip_if_unavailable = skip_if_unavailable_arg
+
+            if not repo_error:
+                self.repos.append(repo)
+
+def main():
+    errors = []
+
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+
+    if argparser.errors:
+        errors.extend(argparser.errors)
+    else:
+        data = [ r.data for r in argparser.repos ]
+
+    if errors:
+        print("+yum_parser_error")
+        print("%errors=" + json.dumps(errors))
+    else:
+        print("+yum_parser_ok")
+        print("%data=" + json.dumps(data, sort_keys=True))
+
+if __name__ == "__main__":
+    main()

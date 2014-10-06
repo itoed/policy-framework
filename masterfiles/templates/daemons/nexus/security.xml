@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    {{#users}}
+    <user>
+      <id>{{id}}</id>
+      <firstName>{{firstName}}</firstName>
+      <lastName>{{lastName}}</lastName>
+      <password>{{password}}</password>
+      <status>{{status}}</status>
+      <email>{{email}}</email>
+    </user>
+    {{/users}}
+  </users>
+  <roles>
+    <role>
+      <id>fghijk-anonymous</id>
+      <name>FGHIJK Restricted Anonymous Role</name>
+      <description>Prevents anonymous user from downloading artifacts</description>
+      <privileges>
+        <privilege>repository-all</privilege>
+        <privilege>1</privilege>
+        <privilege>nexus-healthcheck-summary-read</privilege>
+        <privilege>6</privilege>
+        <privilege>nexus-healthcheck-read</privilege>
+        <privilege>55</privilege>
+        <privilege>browse-remote-repo</privilege>
+        <privilege>70</privilege>
+        <privilege>74</privilege>
+        <privilege>14</privilege>
+      </privileges>
+    </role>
+  </roles>
+  <userRoleMappings>
+    {{#userRoleMappings}}
+    <userRoleMapping>
+      <userId>{{userId}}</userId>
+      <source>{{source}}</source>
+      <roles>
+        {{#roles}}
+        <role>{{.}}</role>
+        {{/roles}}
+      </roles>
+    </userRoleMapping>
+    {{/userRoleMappings}}
+  </userRoleMappings>
+</security>

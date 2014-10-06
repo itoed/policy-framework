@@ -1,0 +1,75 @@
+# CREATEREPO
+#
+
+body file control
+{
+  namespace => "createrepo";
+     inputs => {
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"           slist => { "config" };
+
+  vars:
+      "version"     string => "$(info[version])",
+                ifvarclass => isvariable("info[version]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"               slist => { "validation" };
+
+  vars:
+      "required_classes"   slist => classesmatching(".*", "requires=createrepo");
+
+  classes:
+      "action_required"
+      expression => "$(required_classes)",
+           scope => "namespace";
+
+    action_required::
+      "version_error"
+             not => isvariable("createrepo:config.version");
+
+    default:any::
+      "validation_ok"
+      expression => "!version_error",
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected field 'version'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  classes:
+      "error"         expression => "$(package[error])",
+                           scope => "namespace";
+      "repaired"      expression => "$(package[repaired])",
+                           scope => "namespace";
+      "kept"          expression => "$(package[kept])",
+                           scope => "namespace";
+      "ok"            expression => "$(package[ok])",
+                           scope => "namespace";
+
+  methods:
+    action_required::
+      "package"         usebundle => package:yum_addupdate('{
+        "name":         "createrepo",
+        "version":      "$(config.version)",
+        "arch":         "noarch"
+      }');
+
+  reports:
+    !action_required::
+      "No action required";
+}

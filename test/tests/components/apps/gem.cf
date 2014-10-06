@@ -1,0 +1,340 @@
+# GEM TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[gem])",
+               };
+}
+
+bundle agent A1_01_gemrcFile_usingDefaults_contentsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"      string => "$(knowledge.expected_dir)/gem/gemrc.txt";
+      "actual"        string => "$(knowledge.tmp_dir)/.gemrc";
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "id":         "test_gemrc",
+        "homedir":    "$(knowledge.tmp_dir)",
+        "user":       "$(knowledge.env_user)"
+      }');
+
+      "file_diff"     usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class("gem:gemrc_file_test_gemrc_repaired");
+      "ok"            usebundle => assert_class("gem:gemrc_file_test_gemrc_ok");
+      "not_kept"      usebundle => assert_not_class("gem:gemrc_file_test_gemrc_kept");
+      "not_error"     usebundle => assert_not_class("gem:gemrc_file_test_gemrc_error");
+}
+
+bundle agent A1_02_gemrcFile_withTwoSources_contentsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"      string => "$(knowledge.expected_dir)/gem/gemrc2.txt";
+      "actual"        string => "$(knowledge.tmp_dir)/.gemrc";
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "id":         "test_gemrc"
+        "homedir":    "$(knowledge.tmp_dir)",
+        "user":       "$(knowledge.env_user)",
+        "sources":    [
+          "https://rubygems.org/",
+          "http://admin:admin123@nexus.pacman.fghijk.local/content/repositories/rubygems/"
+        ]
+      }');
+
+      "file_diff"     usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class("gem:gemrc_file_test_gemrc_repaired");
+      "ok"            usebundle => assert_class("gem:gemrc_file_test_gemrc_ok");
+      "not_kept"      usebundle => assert_not_class("gem:gemrc_file_test_gemrc_kept");
+      "not_error"     usebundle => assert_not_class("gem:gemrc_file_test_gemrc_error");
+}
+
+bundle agent A1_03_gemrcFile_correctFileExists_keptClassSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"      string => "$(knowledge.expected_dir)/gem/gemrc2.txt";
+      "actual"        string => "$(knowledge.tmp_dir)/.gemrc";
+
+  files:
+      "$(actual)"
+        copy_from => local_cp("$(expected)"),
+            perms => m("600");
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "id":         "test_gemrc"
+        "homedir":    "$(knowledge.tmp_dir)",
+        "user":       "$(knowledge.env_user)",
+        "sources":    [
+          "https://rubygems.org/",
+          "http://admin:admin123@nexus.pacman.fghijk.local/content/repositories/rubygems/"
+        ]
+      }');
+
+      "file_diff"     usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "kept"          usebundle => assert_class(
+                                    "gem:gemrc_file_test_gemrc_kept");
+      "ok"            usebundle => assert_class(
+                                    "gem:gemrc_file_test_gemrc_ok");
+      "not_repaired"  usebundle => assert_not_class(
+                                    "gem:gemrc_file_test_gemrc_repaired");
+      "not_error"     usebundle => assert_not_class(
+                                    "gem:gemrc_file_test_gemrc_error");
+}
+
+bundle agent A2_01_gemrcFile_noHomedirAndNoId_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "has_classes" expression => classmatch("gem:.*"), scope => "namespace";
+      "second_pass" expression => "first_pass";
+      "first_pass" expression => "default:any";
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "user":       "$(knowledge.env_user)"
+      }');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:has_classes");
+}
+
+bundle agent A2_02_gemrcFile_unresolvableArgs_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "has_classes" expression => classmatch("gem:.*"), scope => "namespace";
+      "second_pass" expression => "first_pass";
+      "first_pass" expression => "default:any";
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "id":         "$(not_a_var)",
+        "homedir":    "/tmp/not-a-dir",
+        "user":       "$(knowledge.env_user)"
+      }');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:has_classes");
+}
+
+bundle agent A2_03_gemrcFile_noHomedir_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "gemrc_file"    usebundle => gem:gemrc_file('{
+        "id":         "should-fail",
+        "user":       "$(knowledge.env_user)"
+      }');
+
+      "error"         usebundle => assert_class(
+                                    "gem:gemrc_file_should_fail_error");
+      "not_repaired"  usebundle => assert_not_class(
+                                    "gem:gemrc_file_should_fail_repaired");
+      "not_kept"      usebundle => assert_not_class(
+                                    "gem:gemrc_file_should_fail_kept");
+      "not_ok"        usebundle => assert_not_class(
+                                    "gem:gemrc_file_should_fail_ok");
+}
+
+bundle agent B1_01_bundlerConfigFile_oneMirrors_contentsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"      string => "$(knowledge.expected_dir)/gem/bundler_config_one_mirror.txt";
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "one_mirror",
+        "homedir":            "$(knowledge.tmp_dir)",
+        "user":               "$(knowledge.env_user)"
+        "mirrors": {
+          "https://rubygems.org": "http://admin:admin123@nexus.pacman.fghijk.local/content/repositories/rubygems/"
+        }
+      }');
+
+      "file_diff"             usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class(
+                                    "gem:bundler_config_file_one_mirror_repaired");
+      "ok"            usebundle => assert_class(
+                                    "gem:bundler_config_file_one_mirror_ok");
+      "not_kept"      usebundle => assert_not_class(
+                                    "gem:bundler_config_file_one_mirror_kept");
+      "not_error"     usebundle => assert_not_class(
+                                    "gem:bundler_config_file_one_mirror_error");
+}
+
+bundle agent B1_02_bundlerConfigFile_threeMirrors_contentsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"      string => "$(knowledge.expected_dir)/gem/bundler_config.txt";
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "3-mirrors",
+        "homedir":            "$(knowledge.tmp_dir)",
+        "user":               "$(knowledge.env_user)"
+        "mirrors": {
+          "https://rubygems1.org": "http://mirror1.localhost",
+          "https://rubygems2.org": "http://mirror2.localhost",
+          "https://rubygems3.org": "http://mirror3.localhost"
+        }
+      }');
+
+      "file_diff"             usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class(
+                                    "gem:bundler_config_file_3_mirrors_repaired");
+      "ok"            usebundle => assert_class(
+                                    "gem:bundler_config_file_3_mirrors_ok");
+      "not_kept"      usebundle => assert_not_class(
+                                    "gem:bundler_config_file_3_mirrors_kept");
+      "not_error"     usebundle => assert_not_class(
+                                    "gem:bundler_config_file_3_mirrors_error");
+}
+
+bundle agent B1_03_bundlerConfigFile_noMirrors_fileDoesNotExist
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "no.mirrors",
+        "homedir":            "$(knowledge.tmp_dir)",
+        "user":               "$(knowledge.env_user)"
+      }');
+
+      "no_file"       usebundle => assert_not_file("$(actual)");
+
+      "kept"          usebundle => assert_class(
+                                    "gem:bundler_config_file_no_mirrors_kept");
+      "ok"            usebundle => assert_class(
+                                    "gem:bundler_config_file_no_mirrors_ok");
+      "not_repaired"  usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_mirrors_repaired");
+      "not_error"     usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_mirrors_error");
+}
+
+bundle agent B2_01_bundlerConfigFile_noHomedir_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "no!homedir",
+        "user":               "$(knowledge.env_user)"
+      }');
+
+      "no_file"       usebundle => assert_not_file("$(actual)");
+
+
+      "error"         usebundle => assert_class(
+                                    "gem:bundler_config_file_no_homedir_error");
+      "not_ok"        usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_homedir_ok");
+      "not_kept"      usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_homedir_kept");
+      "not_repaired"  usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_homedir_repaired");
+}
+
+bundle agent B2_02_bundlerConfigFile_noOwner_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "no*user",
+        "homedir":            "$(knowledge.tmp_dir)",
+      }');
+
+      "no_file"       usebundle => assert_not_file("$(actual)");
+
+
+      "error"         usebundle => assert_class(
+                                    "gem:bundler_config_file_no_user_error");
+      "not_ok"        usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_user_ok");
+      "not_kept"      usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_user_kept");
+      "not_repaired"  usebundle => assert_not_class(
+                                    "gem:bundler_config_file_no_user_repaired");
+}
+
+bundle agent B2_04_bundlerConfigFile_idUnresolvable_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "actual"        string => "$(knowledge.tmp_dir)/.bundle/config";
+
+  classes:
+      "has_classes" expression => classmatch("gem:.*"), scope => "namespace";
+      "second_pass" expression => "first_pass";
+      "first_pass" expression => "default:any";
+
+  methods:
+      "bundler_config_file"   usebundle => gem:bundler_config_file('{
+        "id":                 "$(now_a_var)",
+        "homedir":            "$(knowledge.tmp_dir)",
+      }');
+
+      "no_file"       usebundle => assert_not_file("$(actual)");
+    second_pass::
+      "no_classes"    usebundle => assert_not_class("test:has_classes");
+}
+
+body copy_from local_cp(from)
+{
+  source => "$(from)";
+}
+
+body perms m(mode)
+{
+  mode => "$(mode)";
+}

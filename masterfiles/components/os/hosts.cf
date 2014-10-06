@@ -1,0 +1,156 @@
+# OS - Hosts
+#
+# Edits the hosts file as per the policy configuration:
+#
+# Example:
+#
+# {
+#   "aliases": {    // Optional local aliases
+#     "jenkins":      "jenkins.example.com",
+#     "nexus":        "nexus.example.com"
+#   },
+#   "lan": {      // Optional external hostnames
+#     "192.168.1.201":    "service1.example.com",
+#     "192.168.1.202":    "service2.example.com"
+#   }
+# }
+#
+#
+
+body file control
+{
+  namespace => "hosts";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.os[network])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"      slist => { "config" };
+
+  vars:
+      "ip"                string => "$(network:config.ip)",
+                      ifvarclass => isvariable("network:config.ip");
+
+      "hostname"          string => "$(network:config.hostname)",
+                      ifvarclass => isvariable("network:config.hostname");
+
+      "fqhost"            string => "$(network:config.fqhost)",
+                      ifvarclass => isvariable("network:config.fqhost");
+
+      "aliases"             data => parsejson('[]'),
+                      ifvarclass => not(isvariable("aliases"));
+      "aliases"             data => mergedata("info[aliases]"),
+                      ifvarclass => isvariable("info[aliases]");
+
+      "lan"                 data => parsejson('{}'),
+                      ifvarclass => not(isvariable("lan"));
+      "lan"                 data => mergedata("info[lan]"),
+                      ifvarclass => isvariable("info[lan]");
+
+      "hosts_file"        string => "/etc/hosts",
+                      ifvarclass => not(isvariable("hosts_file"));
+      "hosts_file"        string => "$(info[hosts_file])",
+                      ifvarclass => isvariable("info[hosts_file]");
+
+      "owner"             string => "root",
+                      ifvarclass => not(isvariable("owner"));
+      "owner"             string => "$(info[owner])",
+                      ifvarclass => isvariable("info[owner]");
+
+      "hosts_template"    string => "$(inputs:dirs.templatedir)/os/hosts/hosts.txt";
+      "hosts_parser"      string => "$(inputs:dirs.moduledir)/hosts_parser";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  methods:
+      "hosts_file"      usebundle => hosts:hosts_file;
+}
+
+bundle agent hosts_file
+{
+  vars:
+      "parser_module"         string => "$(hosts:config.hosts_parser)";
+      "parser_argsjson"       string => format('{
+        "ip":                 "$(config.ip)",
+        "hostname":           "$(config.hostname)",
+        "fqhost":             "$(config.fqhost)",
+        "aliases":            %S,
+        "lan":                %S
+      }', "hosts:config.aliases",
+          "hosts:config.lan");
+
+    hosts_parser_ok::
+      "file_argsjson"         string => format('{
+        "path":               "$(config.hosts_file)",
+        "owner":              "$(config.owner)",
+        "mode":               "644",
+        "create":             "true",
+        "template":           "$(config.hosts_template)",
+        "template_data": {
+          "hosts":            %S
+        }
+      }', "default:hosts_parser.data");
+
+  classes:
+      "parser_argsjson_error"
+             not => isvariable("parser_argsjson");
+
+    hosts_parser_ok::
+      "file_argsjson_error"
+             not => isvariable("file_argsjson");
+
+    default:any::
+      "hosts_file_error"
+              or => { "parser_argsjson_error",
+                      "parser_invoke_error",
+                      "hosts_parser_error",
+                      "file_argsjson_error",
+                      "$(edit_file[error])",
+                    },
+           scope => "namespace";
+
+      "hosts_file_kept"
+      expression => "$(edit_file[kept])",
+      ifvarclass => "!hosts_file_error",
+           scope => "namespace";
+
+      "hosts_file_repaired"
+      expression => "$(edit_file[repaired])",
+      ifvarclass => "!hosts_file_error",
+           scope => "namespace";
+
+      "hosts_file_ok"
+      expression => "$(edit_file[ok])",
+      ifvarclass => "!hosts_file_error",
+           scope => "namespace";
+
+  methods:
+    hosts_parser_ok::
+      "edit_file"         usebundle => file:edit_file("$(file_argsjson)"),
+                          useresult => "edit_file",
+                         ifvarclass => "!hosts_file_error";
+
+  commands:
+    "$(parser_module) '$(parser_argsjson)'"
+        module => "true",
+       classes => class:local("parser_invoke"),
+    ifvarclass => "!hosts_file_error";
+
+  reports:
+    parser_argsjson_error::
+      "ERROR: String variable 'parser_argsjson' could not be declared";
+    file_argsjson_error::
+      "ERROR: String variable 'file_argsjson' could not be declared";
+    hosts_parser_error::
+      "ERROR: $(default:hosts_parser.errors)"
+      ifvarclass => isvariable("default:hosts_parser.errors");
+}

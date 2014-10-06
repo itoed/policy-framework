@@ -1,0 +1,76 @@
+# SHIRO HASHER
+#
+
+body file control
+{
+  namespace => "shiro_hasher";
+     inputs => {
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"           slist => { "config" };
+
+  vars:
+      "version"     string => "$(info[version])",
+                ifvarclass => isvariable("info[version]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"           slist => { "validation" };
+
+  vars:
+      "required_classes"  slist => classesmatching(".*", "requires=shiro_hasher");
+
+  classes:
+      "action_required"
+      expression => "$(required_classes)",
+           scope => "namespace";
+
+    action_required::
+      "version_error"
+             not => isvariable("shiro_hasher:config.version");
+
+    default:any::
+      "validation_ok"
+      expression => "!version_error",
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected field 'version'";
+}
+
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  classes:
+      "error"     expression => "$(shiro_hasher[error])",
+                       scope => "namespace";
+      "repaired"  expression => "$(shiro_hasher[repaired])",
+                       scope => "namespace";
+      "kept"      expression => "$(shiro_hasher[kept])",
+                       scope => "namespace";
+      "ok"        expression => "$(shiro_hasher[ok])",
+                       scope => "namespace";
+
+  methods:
+    action_required::
+      "shiro_hasher"      usebundle => package:yum_addupdate('{
+        "name":           "fghijk-shiro-hasher",
+        "version":        "$(config.version)",
+        "arch":           "noarch"
+      }');
+
+  reports:
+    !action_required::
+      "No action required";
+}

@@ -1,0 +1,1985 @@
+# FILE TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle agent A01_editDir_newDir_isDirectory
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true"
+      }');
+
+      "assert"        usebundle => assert_directory("$(path)");
+}
+
+bundle agent A02_editDir_newDir_permsAre755
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true"
+      }');
+
+      "assert"            usebundle => assert_file_perms("755", "$(path)");
+}
+
+bundle agent A03_editDir_newDirWithPerms_permsAre700
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "700",
+        "create":         "true"
+      }');
+
+      "assert"            usebundle => assert_file_perms("700", "$(path)");
+}
+
+bundle agent A04_editDir_changeExistingDirWithPerms700_permsAre755
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing_dir";
+
+  files:
+      "$(path)/."
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "755"
+      }');
+      "assert"            usebundle => assert_file_perms("755", "$(path)");
+}
+
+bundle agent A05_editDir_newDir_classesDirectoryRepairedAndOkAreSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(knowledge.tmp_dir)/newdir",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "700",
+        "create":         "true"
+      }');
+
+      "assert_repaired"   usebundle => assert_class("file:edit_dir_newdir_repaired");
+      "assert_ok"         usebundle => assert_class("file:edit_dir_newdir_ok");
+}
+
+bundle agent A06_editDir_existingDirIncorrectPerms_classesDirectoryRepairedAndOkAreSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing_dir";
+
+  files:
+      "$(path)/."
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert_repaired"   usebundle => assert_class(
+                                        "file:edit_dir_existing_dir_repaired");
+      "assert_ok"         usebundle => assert_class(
+                                        "file:edit_dir_existing_dir_ok");
+}
+
+bundle agent A07_editDir_pathIsAlreadyAPlainFile_classDirectoryErrorIsSetAndOkIsNot
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  files:
+      "$(path)"
+      create => "true";
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(knowledge.tmp_dir)/newdir",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert"          usebundle => assert_class(
+                                        "file:edit_dir_newdir_error");
+      "assert_not_ok"   usebundle => assert_not_class(
+                                        "file:edit_dir_newdir_ok");
+}
+
+bundle agent A08_editDir_existingDirWithCorrectPerms_classesDirectoryKeptAndOkAreSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  files:
+      "$(path)/."
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "mode":           "700",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert_kept"       usebundle => assert_class(
+                                        "file:edit_dir_newdir_kept");
+      "assert_ok"         usebundle => assert_class(
+                                        "file:edit_dir_newdir_ok");
+}
+
+bundle agent A09_editDir_noPath_noClassesSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_dir"          usebundle => file:edit_dir('{
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent A10_editDir_unresolvableArgs_classDirectoryErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":       "$(unknown)"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent A11_editDir_nonExistentUser_classDirectoryErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":       "$(knowledge.tmp_dir)/newdir",
+        "owner":      "bugs_bunny_78",
+        "group":      "$(knowledge.env_user)",
+        "create":     "true"
+      }');
+
+      "assert"        usebundle => assert_class(
+                                        "file:edit_dir_newdir_error");
+}
+
+bundle agent A12_editDir_nonExistentGroup_classDirectoryErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":       "$(knowledge.tmp_dir)/newdir"
+        "owner":      "$(knowledge.env_user)",
+        "group":      "bugs_bunny_78",
+        "create":     "true"
+      }');
+
+      "assert"        usebundle => assert_class(
+                                        "file:edit_dir_newdir_error");
+}
+
+bundle agent A13_editDir_nonExistentParent_classDirectoryErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":       "$(knowledge.tmp_dir)/nonexistent/newdir",
+        "create":     true
+      }');
+
+      "assert"        usebundle => assert_class(
+                                        "file:edit_dir_newdir_error");
+}
+
+bundle agent A14_editDir_invalidPerms_classDirectoryErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "mode":           "7555",
+        "create":         "true"
+      }');
+
+      "assert"        usebundle => assert_class(
+                                        "file:edit_dir_newdir_error");
+}
+
+bundle agent A15_editDir_invalidRestoreconArg_classErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(knowledge.tmp_dir)/dir-should-not-exist",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "restorecon"      "tru"
+      }');
+
+      "assert"        usebundle => assert_class(
+                                        "file:edit_dir_dir_should_not_exist_error");
+}
+
+bundle agent A16_editDir_noRestorecon_mockLogDoesNotExist
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  methods:
+      "config"  usebundle => file:config(@(info));
+
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+      }');
+
+      "assert"        usebundle => assert_not_file("$(logpath)");
+}
+
+bundle agent A17_editDir_restoreconButDirNotRepaired_mockLogDoesNotExist
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existingdir";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"              data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  files:
+      "$(path)/."
+      create => "true";
+
+  methods:
+      "config"        usebundle => file:config(@(info));
+
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_not_file("$(logpath)");
+}
+
+bundle agent A18_editDir_restoreconAndDirCreated_mockLogContentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"              data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  methods:
+      "config"        usebundle => file:config(@(info));
+
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(path)", "$(logpath)");
+}
+
+bundle agent A19_editDir_restoreconAndPermsRepaired_mockLogContentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existingdir";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"              data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  files:
+      "$(path)/."
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "config"        usebundle => file:config(@(info));
+
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(path)", "$(logpath)");
+}
+
+bundle agent A20_editDir_restoreconFailed_errorClassIsOnlyClassSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing_dir";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/error-script"
+      }');
+
+  files:
+      "$(path)/."
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "config"          usebundle => file:config(@(info));
+
+      "edit_dir"              usebundle => file:edit_dir('{
+        "path":               "$(path)",
+        "owner":              "$(knowledge.env_user)",
+        "restorecon"          "true"
+      }');
+
+      "assert_error"          usebundle => assert_class(
+                                            "file:edit_dir_existing_dir_error");
+      "assert_not_kept"       usebundle => assert_not_class(
+                                            "file:edit_dir_existing_dir_kept");
+      "assert_not_repaired"   usebundle => assert_not_class(
+                                            "file:edit_dir_existing_dir_repaired");
+      "assert_not_ok"         usebundle => assert_not_class(
+                                            "file:edit_dir_existing_dir_ok");
+}
+
+bundle agent A21_editDir_dirDoesNotExistAndCreateArgIsFalse_directoryNotCreated
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "false"
+      }');
+
+      "assert"        usebundle => assert_not_file("$(path)");
+}
+
+bundle agent A22_editDir_createArgIsInvalid_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newdir";
+
+  files:
+      "$(path)/."
+      create => "true";
+
+  methods:
+      "edit_dir"      usebundle => file:edit_dir('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "fals"
+      }');
+
+      "assert"        usebundle => assert_class(
+                                            "file:edit_dir_newdir_error");
+}
+
+bundle agent B01_editFile_existingFile_quotedValueAEquals1AndBEquals2
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines('a=""$(const.n)b=""');
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "quoted_values":  {
+          "a":    "1",
+          "b":    "2"
+        }
+      }');
+
+      "assert"        usebundle => assert_file_contents('a="1"$(const.n)b="2"',
+                                    "$(path)");
+}
+
+bundle agent B02_editFile_existingFileModeIs644_repairedModeIs600
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+      create => "true",
+       perms => default:m("644");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert"        usebundle => assert_file_perms("600", "$(path)");
+}
+
+bundle agent B03_editFile_newFileWithMode644_repairedModeIs644
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "create":         "true",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "644"
+      }');
+
+      "assert"        usebundle => assert_file_perms("644", "$(path)");
+}
+
+bundle agent B04_editFile_repairExistingFileMode_repairedAndOkClassesAreSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+      create => "true";
+
+  methods:
+      "edit_file"       usebundle => file:edit_file('{
+        "path":         "$(path)",
+        "owner":        "$(knowledge.env_user)",
+        "mode":         "644"
+      }');
+
+      "repaired"        usebundle => assert_class("file:edit_file_greetings_repaired");
+      "ok"              usebundle => assert_class("file:edit_file_greetings_ok");
+}
+
+bundle agent B05_editFile_withoutPath_noClassesSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "mode":       "XYZ",
+        "owner":      "hello"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent B06_editFile_fileDoesNotExistAndNoCreateAttribute_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "644"
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B07_editFile_fileExistsWithCorrectMode_keptClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":       "$(path)",
+        "owner":      "$(knowledge.env_user)",
+        "mode":       "600"
+      }');
+
+      "kept"          usebundle => assert_class("file:edit_file_greetings_kept");
+}
+
+bundle agent B08_editFile_existingFileWithTemplate_contentsEqualHelloWorld
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "template"        string => "$(knowledge.tmp_dir)/greetings.mustache";
+
+  files:
+      "$(path)"
+         create => "true";
+
+      "$(template)"
+         create => "true",
+      edit_line => default:insert_lines("Hello {{x}}!");
+
+  methods:
+      "edit_file"           usebundle => file:edit_file('{
+        "path":             "$(path)",
+        "owner":            "$(knowledge.env_user)",
+        "template":         "$(template)"
+        "template_data": {
+          "x":              "world"
+        }
+      }');
+
+      "assert"        usebundle => assert_file_contents("Hello world!", "$(path)");
+}
+
+bundle agent B09_editFile_twoExistingFilesWithTwoTemplates_contentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path1"           string => "$(knowledge.tmp_dir)/greetings1";
+      "template1"       string => "$(knowledge.tmp_dir)/greetings.mustache1";
+      "path2"           string => "$(knowledge.tmp_dir)/greetings2";
+      "template2"       string => "$(knowledge.tmp_dir)/greetings.mustache2";
+
+  files:
+      "$(path1)"
+         create => "true";
+
+      "$(template1)"
+         create => "true",
+      edit_line => default:insert_lines("Hello {{x}}!");
+
+      "$(path2)"
+         create => "true";
+
+      "$(template2)"
+         create => "true",
+      edit_line => default:insert_lines("{{x}} world!");
+
+  methods:
+      "edit_file1"    usebundle => file:edit_file('{
+        "path":           "$(path1)",
+        "owner":          "$(knowledge.env_user)",
+        "template":       "$(template1)"
+        "template_data":  {
+          "x":      "world"
+        }
+      }');
+
+      "edit_file2"    usebundle => file:edit_file('{
+        "path":           "$(path2)",
+        "owner":          "$(knowledge.env_user)",
+        "mode":           "644",
+        "template":       "$(template2)"
+        "template_data":  {
+          "x":      "Goodbye"
+        }
+      }');
+
+      "assert1"       usebundle => assert_file_contents("Hello world!", "$(path1)");
+      "assert2"       usebundle => assert_file_contents("Goodbye world!", "$(path2)");
+}
+
+bundle agent B10_editFile_templateDataIsMissing_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "template"        string => "$(knowledge.tmp_dir)/greetings.mustache";
+
+  files:
+      "$(path)"
+         create => "true";
+
+      "$(template)"
+         create => "true",
+      edit_line => default:insert_lines("Hello {{x}}!");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "template":       "$(template)"
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B11_editFile_newFileWithTemplate_contentsEqualHelloWorld
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "template"        string => "$(knowledge.tmp_dir)/greetings.mustache";
+
+  files:
+      "$(template)"
+         create => "true",
+      edit_line => default:insert_lines("Hello {{x}}!");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "template":       "$(template)"
+        "template_data":  {
+          "x":      "world"
+        }
+      }');
+
+      "assert"        usebundle => assert_file_contents("Hello world!", "$(path)");
+}
+
+bundle agent B12_editFile_pathIsAlreadyADirectory_errorClassIsSetAndOkClassIsNot
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)/."
+         create => "true";
+
+  methods:
+      "edit_file"       usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)"
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+      "not_ok"        usebundle => assert_not_class("file:edit_file_greetings_ok");
+}
+
+bundle agent B13_editFile_nonExistentParent_errorClassIsSetAndOkClassIsNot
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/nonexistent/greetings";
+
+  methods:
+      "edit_file"       usebundle => file:edit_file('{
+        "path":         "$(path)",
+        "owner":        "$(knowledge.env_user)",
+        "create":       "true"
+        }
+      }');
+
+      "error"       usebundle => assert_class("file:edit_file_greetings_error");
+      "not_ok"      usebundle => assert_not_class("file:edit_file_greetings_ok");
+}
+
+bundle agent B14_editFile_creationFlagIsYes_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "yes"
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B15_editFile_invalidArgs_noClassesSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":       "$(knowledge.tmp_dir)/greetings";
+        "owner":      "unknown_person",
+        "mode":       "$(not_a_mode)"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent B16_editFile_invalidMode_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "mode":           "75"
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B17_editFile_invalidOwner_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "bugs_bunny_78",
+        "group":          "$(knowledge.env_user)"
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B18_editFile_invalidGroup_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "group":          "bugs_bunny_78"
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B19_editFile_nonExistentTemplate_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "template":       "$(knowledge.tmp_dir)/not-a-template"
+        "template_data": {}
+        }
+      }');
+
+      "error"         usebundle => assert_class("file:edit_file_greetings_error");
+}
+
+bundle agent B20_editFile_existingFileWithContents_oldContentsReplaced
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "current_lines"   string => "Hello$(const.n)World!$(const.n)";
+      "expected_lines"  string => "Good$(const.n)Evening and sleep tight...";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines("$(current_lines)");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "contents":       [ "$(expected_lines)" ]
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(expected_lines)", "$(path)");
+}
+
+bundle agent B21_editFile_newFileEditContents_contentsAdded
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "expected_lines"  string => "Hello$(const.n)World!";
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "contents":       [ "$(expected_lines)" ]
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(expected_lines)", "$(path)");
+}
+
+bundle agent B22_editFile_existingFileWithContentsAndContentArgsEmpty_contentsErased
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines("Hello world");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "contents":       []
+      }');
+
+      "assert"        usebundle => assert_file_contents("", "$(path)");
+}
+
+bundle agent B23_editFile_existingFileNoEditingMode_contentsRemain
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "expected_lines"  string => "Hello$(const.n)World!";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines("$(expected_lines)");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(expected_lines)", "$(path)");
+}
+
+bundle agent B24_editFile_invalidRestoreconArg_classErrorIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(knowledge.tmp_dir)/file-should-not-exist",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "restorecon"      "tru"
+      }');
+
+      "error"         usebundle => assert_class(
+                                    "file:edit_file_file_should_not_exist_error");
+}
+
+bundle agent B25_editFile_noRestorecon_mockLogDoesNotExist
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newfile";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  methods:
+      "config"  usebundle => file:config(@(info));
+
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true"
+      }');
+
+      "assert"        usebundle => assert_not_file("$(logpath)");
+}
+
+bundle agent B26_editFile_restoreconButFileNotRepaired_mockLogDoesNotExist
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  files:
+      "$(path)"
+      create => "true";
+
+  methods:
+      "config"        usebundle => file:config(@(info));
+
+      "edit_file"     usebundle => file:edit_file('{
+        "path":       "$(path)",
+        "owner":      "$(knowledge.env_user)",
+        "restorecon"  "true"
+      }');
+
+      "assert"        usebundle => assert_not_file("$(logpath)");
+}
+
+bundle agent B27_editFile_restoreconAndFileCreated_mockLogContentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/newfile";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  methods:
+      "config"  usebundle => file:config(@(info));
+
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "create":         "true",
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(path)", "$(logpath)");
+}
+
+bundle agent B28_editFile_restoreconAndPermsRepaired_mockLogContentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  files:
+      "$(path)"
+      create => "true",
+       perms => default:m("644");
+
+  methods:
+      "config"  usebundle => file:config(@(info));
+
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(path)", "$(logpath)");
+}
+
+bundle agent B29_editFile_restoreconFailed_errorClassIsOnlyClassSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/error-script"
+      }');
+
+  files:
+      "$(path)"
+      create => "true",
+       perms => default:m("700");
+
+  methods:
+      "config"                usebundle => file:config(@(info));
+
+      "edit_file"             usebundle => file:edit_file('{
+        "path":               "$(path)",
+        "owner":              "$(knowledge.env_user)",
+        "restorecon"          "true"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_file_existing_file_error");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_kept");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_repaired");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_ok");
+}
+
+bundle agent B30_editFile_restoreconAndContentsRepaired_mockLogContentsMatch
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+      "logpath"         string => "$(knowledge.tmp_dir)/restorecon-success.log";
+
+      "info"        data => parsejson('{
+        "restorecon_cmd":     "$(knowledge.mocks_dir)/restorecon-success"
+      }');
+
+  files:
+      "$(path)"
+      create => "true";
+
+  methods:
+      "config"  usebundle => file:config(@(info));
+
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "contents":       [ "Hello world!" ]
+        "restorecon"      "true"
+      }');
+
+      "assert"        usebundle => assert_file_contents("$(path)", "$(logpath)");
+}
+
+bundle agent B31_editFile_twoSourceFilesOnExistingFile_contentsRepaired
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+      "original"         slist => { "I'm", "Garbage!" };
+      "contents1"        slist => { "Hello", "world!" };
+      "contents2"        slist => { "Okie", "dokie" };
+      "source1"         string => "$(knowledge.tmp_dir)/source1";
+      "source2"         string => "$(knowledge.tmp_dir)/source2";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines(@(original));
+
+      "$(source1)"
+         create => "true",
+      edit_line => default:insert_lines(@(contents1));
+
+      "$(source2)"
+         create => "true",
+      edit_line => default:insert_lines(@(contents2));
+
+  methods:
+      "edit_file"             usebundle => file:edit_file('{
+        "path":               "$(path)",
+        "owner":              "$(knowledge.env_user)",
+        "create":             "true",
+        "content_sources":    [ "$(source1)", "$(source2)" ]
+      }');
+
+      "assert_contents"       usebundle => assert_file_contents(
+                        "Hello$(const.n)world!$(const.n)Okie$(const.n)dokie", "$(path)");
+
+      "repaired"        usebundle => assert_class(
+                                      "file:edit_file_existing_file_repaired");
+      "ok"              usebundle => assert_class(
+                                      "file:edit_file_existing_file_ok");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_kept");
+      "not_error"       usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_error");
+}
+
+bundle agent B32_editFile_twoSourceFilesOnExistingFileAsPromised_contentsKept
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/existing-file";
+      "original"         slist => { "Hello", "world!", "Okie", "dokie" };
+      "contents1"        slist => { "Hello", "world!" };
+      "contents2"        slist => { "Okie", "dokie" };
+      "source1"         string => "$(knowledge.tmp_dir)/source1";
+      "source2"         string => "$(knowledge.tmp_dir)/source2";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines(@(original));
+
+      "$(source1)"
+         create => "true",
+      edit_line => default:insert_lines(@(contents1));
+
+      "$(source2)"
+         create => "true",
+      edit_line => default:insert_lines(@(contents2));
+
+  methods:
+      "edit_file"             usebundle => file:edit_file('{
+        "path":               "$(path)",
+        "owner":              "$(knowledge.env_user)",
+        "create":             "true",
+        "content_sources":    [ "$(source1)", "$(source2)" ]
+      }');
+
+      "assert_contents"       usebundle => assert_file_contents(
+                        "Hello$(const.n)world!$(const.n)Okie$(const.n)dokie", "$(path)");
+
+      "kept"            usebundle => assert_class(
+                                      "file:edit_file_existing_file_kept");
+      "ok"              usebundle => assert_class(
+                                      "file:edit_file_existing_file_ok");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_repaired");
+      "not_error"       usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_error");
+}
+
+bundle agent B33_editFile_twoSourcesButOneNonExistent_existingFileUnchangedAndErrorClassSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"                    string => "$(knowledge.tmp_dir)/existing-file";
+      "original"                 slist => { "Okie", "dokie" };
+      "contents1"                slist => { "Hello", "world!" };
+      "source1"                 string => "$(knowledge.tmp_dir)/source1";
+      "non_existent_source"     string => "$(knowledge.tmp_dir)/non-existent-file";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines(@(original));
+
+      "$(source1)"
+         create => "true",
+      edit_line => default:insert_lines(@(contents1));
+
+  methods:
+      "edit_file"             usebundle => file:edit_file('{
+        "path":               "$(path)",
+        "owner":              "$(knowledge.env_user)",
+        "create":             "true",
+        "content_sources":    [ "$(source1)", "$(non_existent_source)" ]
+      }');
+
+      "assert_contents"       usebundle => assert_file_contents("Okie$(const.n)dokie",
+                                            "$(path)");
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_file_existing_file_error");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_kept");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_repaired");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_file_existing_file_ok");
+}
+
+bundle agent B34_editFile_existingFile_variableValueAEquals1AndBEquals2
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines("a=");
+
+  methods:
+      "edit_file"     usebundle => file:edit_file('{
+        "path":           "$(path)",
+        "owner":          "$(knowledge.env_user)",
+        "variable_values":  {
+          "a":    "1",
+          "b":    "2"
+        }
+      }');
+
+      "assert"        usebundle => assert_file_contents("a=1$(const.n)b=2",
+                                    "$(path)");
+}
+
+bundle agent C01_copyFile_newFile_contentsEqualHelloWorld
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(source)"
+         create => "true",
+      edit_line => default:insert_lines("Hello$(const.n)world!");
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert"        usebundle => assert_file_contents("Hello$(const.n)world!",
+                                    "$(path)");
+}
+
+bundle agent C02_copyFile_existingFileWrongContents_contentsEqualHelloWorld
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(path)"
+         create => "true",
+      edit_line => default:insert_lines("Goodbye$(const.n)world!");
+
+      "$(source)"
+         create => "true",
+      edit_line => default:insert_lines("Hello$(const.n)world!");
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert"        usebundle => assert_file_contents("Hello$(const.n)world!",
+                                    "$(path)");
+}
+
+bundle agent C03_copyFile_sourceNonExistent_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C04_copyFile_newFile_permsModeIs600
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(source)"
+         create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "assert"        usebundle => assert_file_perms("600", "$(path)");
+}
+
+bundle agent C05_copyFile_existingModeIs600_keptClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(source)"
+         create => "true";
+
+      "$(path)"
+         create => "true",
+          perms => default:m("600");
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":       "$(path)",
+        "source":     "$(source)",
+        "owner":      "$(knowledge.env_user)"
+      }');
+
+      "kept"          usebundle => assert_class("file:copy_file_greetings_kept");
+}
+
+bundle agent C06_copyFile_existingModeIs644_repairedClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  files:
+      "$(source)"
+         create => "true";
+
+      "$(path)"
+         create => "true",
+          perms => default:m("644");
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "$(knowledge.env_user)"
+      }');
+
+      "repaired"      usebundle => assert_class("file:copy_file_greetings_repaired");
+}
+
+bundle agent C07_copyFile_noPath_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "id":         "should-be-an-error",
+        "source":     "/dev/null"
+      }');
+
+      "error"         usebundle => assert_class(
+                                    "file:copy_file_should_be_an_error_error");
+}
+
+bundle agent C08_copyFile_noPath_noClassesSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "source":     "$(knowledge.tmp_dir)/greetings.source"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent C09_copyFile_sourcePathIsMissing_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C10_copyFile_pathIsADirectory_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+
+  files:
+      "$(path)/."
+      create => "true";
+
+      "$(source)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C11_copyFile_parentDoesNotExist_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/nonexistent/greetings";
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+
+  files:
+      "$(source)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C12_copyFile_invalidPermsMode_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+
+  files:
+      "$(source)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "mode":           "75"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C13_copyFile_invalidOwner_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+
+  files:
+      "$(source)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":           "$(path)",
+        "source":         "$(source)",
+        "owner":          "bugs_bunny_78",
+        "group":          "$(knowledge.env_user)"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent C14_copyFile_invalidGroup_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test", "tmpdir" };
+
+  vars:
+      "path"            string => "$(knowledge.tmp_dir)/greetings";
+      "source"          string => "$(knowledge.tmp_dir)/greetings.source";
+
+  files:
+      "$(source)"
+      create => "true";
+
+  methods:
+      "edit_file"     usebundle => file:copy_file('{
+        "path":       "$(path)",
+        "source":     "$(source)",
+        "owner":      "$(knowledge.env_user)",
+        "group":      "bugs_bunny_78"
+      }');
+
+      "error"         usebundle => assert_class("file:copy_file_greetings_error");
+}
+
+bundle agent D01_editLink_argsUnparseable_noClassesSet
+{
+  meta:
+      "tags"            slist => { "test" };
+
+  classes:
+      "has_file_classes"
+      expression => classmatch("file:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(not_a_variable)"
+      }');
+
+    second_pass::
+      "no_file_classes"   usebundle => assert_not_class("test:has_file_classes");
+}
+
+bundle agent D02_editLink_noPath_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test" };
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "id":           "should-be-an-error",
+        "link_from":    "/dev/null"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_should_be_an_error_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_should_be_an_error_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_should_be_an_error_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_should_be_an_error_ok");
+}
+
+bundle agent D03_editLink_noLinkFrom_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test" };
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "/nonexistent",
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_nonexistent_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_ok");
+}
+
+bundle agent D04_editLink_linkFromNonExistent_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test" };
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "/nonexistent",
+        "link_from":    "/nonexistent"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_nonexistent_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_ok");
+}
+
+bundle agent D05_editLink_pathParentdirNonexistent_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test" };
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "/nonexistentdir/nonexistent",
+        "link_from":    "/dev/null"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_nonexistent_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_nonexistent_ok");
+}
+
+bundle agent D06_editLink_pathIsExistingDir_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test", "tmpdir" };
+
+  files:
+      "$(knowledge.tmp_dir)/greetings"
+      create => "true";
+
+      "$(knowledge.tmp_dir)/existingdir/."
+      create => "true";
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(knowledge.tmp_dir)/existingdir",
+        "link_from":    "$(knowledge.tmp_dir)/greetings"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_existingdir_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_existingdir_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_existingdir_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_existingdir_ok");
+}
+
+bundle agent D07_editLink_pathIsExistingFile_errorClassIsSet
+{
+  meta:
+      "tags"            slist => { "test", "tmpdir" };
+
+  files:
+      "$(knowledge.tmp_dir)/greetings"
+      create => "true";
+
+      "$(knowledge.tmp_dir)/existingfile"
+      create => "true";
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(knowledge.tmp_dir)/existingfile",
+        "link_from":    "$(knowledge.tmp_dir)/greetings"
+      }');
+
+      "error"           usebundle => assert_class(
+                                      "file:edit_link_existingfile_error");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_existingfile_repaired");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_existingfile_kept");
+      "not_ok"          usebundle => assert_not_class(
+                                      "file:edit_link_existingfile_ok");
+}
+
+bundle agent D08_editLink_pathDoesNotExist_linkCreated
+{
+  meta:
+      "tags"            slist => { "test", "tmpdir" };
+
+  files:
+      "$(knowledge.tmp_dir)/greetings"
+      create => "true";
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(knowledge.tmp_dir)/greetingsln",
+        "link_from":    "$(knowledge.tmp_dir)/greetings",
+        "owner":        "$(knowledge.env_user)"
+      }'),              useresult => "link";
+
+      "assert_link"     usebundle => assert_symlink("$(knowledge.tmp_dir)/greetingsln");
+}
+
+bundle agent D09_editLink_pathDoesNotExist_repairedAndOkClassesSet
+{
+  meta:
+      "tags"            slist => { "test", "tmpdir" };
+
+  files:
+      "$(knowledge.tmp_dir)/greetings"
+      create => "true";
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(knowledge.tmp_dir)/greetingsln"
+        "link_from":    "$(knowledge.tmp_dir)/greetings",
+        "owner":        "$(knowledge.env_user)"
+      }');
+
+      "repaired"        usebundle => assert_class(
+                                      "file:edit_link_greetingsln_repaired");
+      "ok"              usebundle => assert_class(
+                                      "file:edit_link_greetingsln_ok");
+      "not_kept"        usebundle => assert_not_class(
+                                      "file:edit_link_greetingsln_kept");
+      "not_error"       usebundle => assert_not_class(
+                                      "file:edit_link_greetingsln_error");
+}
+
+bundle agent D10_editLink_pathIsExpectedLink_keptAndOkClassesSet
+{
+  meta:
+      "tags"            slist => { "test", "tmpdir" };
+
+  files:
+      "$(knowledge.tmp_dir)/greetings"
+         create => "true";
+
+      "$(knowledge.tmp_dir)/greetingsln"
+      link_from => default:ln_s("$(knowledge.tmp_dir)/greetings");
+
+  methods:
+      "edit_link"       usebundle => file:edit_link('{
+        "path":         "$(knowledge.tmp_dir)/greetingsln"
+        "link_from":    "$(knowledge.tmp_dir)/greetings",
+        "owner":        "$(knowledge.env_user)"
+      }');
+
+      "assert_link"     usebundle => assert_symlink("$(knowledge.tmp_dir)/greetingsln");
+
+      "kept"            usebundle => assert_class(
+                                      "file:edit_link_greetingsln_kept");
+      "ok"              usebundle => assert_class(
+                                      "file:edit_link_greetingsln_ok");
+      "not_repaired"    usebundle => assert_not_class(
+                                      "file:edit_link_greetingsln_repaired");
+      "not_error"       usebundle => assert_not_class(
+                                      "file:edit_link_greetingsln_error");
+}

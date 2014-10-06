@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import json
+import shlex
+import subprocess
+import sys
+
+#
+# NOTE:
+#
+# Modules in this release were initiallly conceived to deal with one invocation
+# per cf-agent run.  This module runs for every swap defined, which is causing
+# a problem with classes to be defined as they require an ID here, which may
+# not make sense when arguments given are invalid.
+#
+
+class SwapFile(object):
+    def __init__(self, swap_id, path, length):
+        self.swap_id = swap_id
+        self.path = path
+        self.length = length
+        self.errors = []
+
+    def allocate(self):
+        p = subprocess.Popen(
+            shlex.split("fallocate -l {0} {1}".format(self.length, self.path)),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        _, stderr = p.communicate()
+
+        if p.returncode:
+            self.errors.append(
+                ("Swap id '{0}' with path '{1}' and length '{2}' "
+                 "could not be allocated"
+                ).format(self.swap_id, self.path, self.length))
+            self.errors.append(stderr)
+
+    def format_swap(self):
+        p = subprocess.Popen(
+            [ "mkswap", self.path ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        _, stderr = p.communicate()
+
+        if p.returncode:
+            self.errors.append(
+                ("Swap id '{0}' with path '{1}' and length '{2}' "
+                 "could not be formatted"
+                ).format(self.swap_id, self.path, self.length))
+            self.errors.append(stderr)
+
+    def activate(self):
+        p = subprocess.Popen(
+            [ "swapon", self.path ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        _, stderr = p.communicate()
+
+        if p.returncode:
+            self.errors.append(
+                ("Swap id '{0}' with path '{1}' and length '{2}' "
+                 "could not be activated"
+                ).format(self.swap_id, self.path, self.length))
+            self.errors.append(stderr)
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.errors = []
+        self.swap_file = None
+
+    def parse(self, args):
+        if len(args) != 4:
+            self.errors.append(("Module hosts_parser must be "
+                "invoked with exactly three arguments: The swap id, path "
+                "and length"))
+            exit(1)
+
+        self.swap_file = SwapFile(args[1], args[2], args[3])
+
+def main():
+    errors = []
+
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+
+    if argparser.errors:
+        errors.extend(argparser.errors)
+    else:
+        swap_file = argparser.swap_file
+        swap_file.allocate()
+        if not swap_file.errors:
+            swap_file.format_swap()
+        if not swap_file.errors:
+            swap_file.activate()
+
+    if errors:
+        print("+swap_creator_error_" + swap_file.swap_id)
+        print("%errors_{0}={1}".format(swap_file.swap_id, json.dumps(errors)))
+    else:
+        print("+swap_creator_repaired_" + swap_file.swap_id)
+
+if __name__ == "__main__":
+    main()

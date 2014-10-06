@@ -1,0 +1,49 @@
+# CREATEREPO TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[createrepo])",
+               };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "createrepo_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=createrepo" };
+
+  methods:
+      "validate"          usebundle => createrepo:validate;
+      "ok"                usebundle => assert_not_class("createrepo:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "createrepo_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=createrepo" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  methods:
+      "config"            usebundle => createrepo:config(@(info));
+      "validate"          usebundle => createrepo:validate;
+      "validation_ok"     usebundle => assert_class("createrepo:validation_ok");
+}

@@ -1,0 +1,25 @@
+body server control
+{
+  denybadclocks         => "false";
+  allowconnects         => { "127.0.0.1" , "::1", @(policy.acl) };
+  allowallconnects      => { "127.0.0.1" , "::1", @(policy.acl) };
+  trustkeysfrom         => { "127.0.0.1" , "::1", @(policy.acl) };
+  allowusers            => { "root" };
+  maxconnections        => "100";
+  cfruncommand          => "$(sys.cf_twin) -f $(sys.update_policy_path); $(sys.cf_agent)";
+}
+
+bundle server access_rules
+{
+  access:
+      "/bin/sh"
+      admit => { "$(sys.policy_hub)" };
+
+      "/bin/cf-twin"
+      admit => { "$(sys.policy_hub)" };
+
+      "/bin/cf-agent"
+      handle => "grant_access_policy_agent",
+      comment => "Grant access to the agent (for cf-runagent)",
+      admit => { "$(sys.policy_hub)" };
+}

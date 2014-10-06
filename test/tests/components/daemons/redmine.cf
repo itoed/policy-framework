@@ -1,0 +1,39 @@
+# REDMINE TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.daemons[redmine])",
+               };
+}
+
+bundle agent A1_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => redmine:validate;
+      "ok"                usebundle => assert_not_class("redmine:validation_ok");
+}
+
+bundle agent A2_validate_validConfig_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"                  data => parsejson('{
+        "version":            "1",
+        "host":               "redmine.test.local",
+        "database_password":  "P@55word"
+      }');
+
+  methods:
+      "config"            usebundle => redmine:config(@(info));
+      "validate"          usebundle => redmine:validate;
+      "validation_ok"     usebundle => assert_class("redmine:validation_ok");
+}

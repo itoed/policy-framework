@@ -1,0 +1,244 @@
+body file control
+{
+  namespace => "ssh";
+     inputs => {
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle agent edit_user(argsjson)
+{
+  vars:
+      "args"                  data => parsejson('{}');
+      "args"                  data => parsejson("$(argsjson)");
+
+      "user"                string => "$(args[user])";
+      "sshdir"              string => "$(args[sshdir])";
+
+      "id"                  string => "";
+      "id"                  string => canonify("$(user)");
+      "id"                  string => canonify("$(args[id])");
+
+  classes:
+      "valid_id" expression => regcmp(".+", canonify("$(id)"));
+
+    valid_id::
+      "sshdir_error" not => isvariable("args[sshdir]");
+      "user_error" not => isvariable("args[user]");
+
+      "sshdir_ok" expression => "file:edit_dir_ssh_edit_user_sshdir_$(id)_ok";
+
+      "edit_user_$(id)_error"
+                or => {
+                        "sshdir_error",
+                        "user_error",
+                        "file:edit_dir_ssh_edit_user_sshdir_$(id)_error",
+                        "class:batch_ssh_edit_user_$(id)_error",
+                      },
+             scope => "namespace";
+
+      "edit_user_$(id)_kept"
+        expression => "class:batch_ssh_edit_user_$(id)_kept",
+             scope => "namespace";
+
+      "edit_user_$(id)_repaired"
+        expression => "class:batch_ssh_edit_user_$(id)_repaired",
+             scope => "namespace";
+
+      "edit_user_$(id)_ok"
+        expression => "class:batch_ssh_edit_user_$(id)_ok",
+             scope => "namespace";
+
+  methods:
+    valid_id::
+      "edit_dir"        usebundle => file:edit_dir('{
+        "id":           "ssh_edit_user_sshdir_$(id)",
+        "path":         "$(sshdir)",
+        "owner":        "$(user)",
+        "mode":         "700",
+        "create":       "true"
+      }'), ifvarclass => "!edit_user_$(id)_error";
+
+    sshdir_ok::
+      "known_hosts"     usebundle => _known_hosts("$(id)", @(args));
+      "authorized_keys" usebundle => _authorized_keys("$(id)", @(args));
+      "keypair"         usebundle => _keypair("$(id)", @(args));
+      "batch"           usebundle => class:batch("ssh_edit_user_$(id)", '[
+        "file:edit_dir_ssh_edit_user_sshdir_$(id)",
+        "ssh:_known_hosts_$(id)",
+        "ssh:_authorized_keys_$(id)",
+        "ssh:_keypair_$(id)",
+      ]');
+
+  reports:
+    !valid_id::
+      "ERROR: ssh:edit_user failed to parse 'id' from arguments '$(argsjson)'";
+    sshdir_error::
+      "ERROR: Expected field 'sshdir'";
+    user_error::
+      "ERROR: Expected field 'user'";
+}
+
+bundle agent _known_hosts(id, args)
+{
+  vars:
+      "user"                string => "$(args[user])";
+      "sshdir"              string => "$(args[sshdir])";
+      "known_hosts"           data => mergedata("args[known_hosts]");
+
+      "h"                        slist => getindices("known_hosts");
+      "contents_$(id)[$(h)]"    string => concat("$(h) ",
+                                                 readfile("$(known_hosts[$(h)])", 4095));
+      "content_lines"            slist => getvalues("contents_$(id)");
+      "content_lines"            slist => sort("content_lines", "lex");
+      # Content lines must be converted to a data container, otherwise
+      # format() will output an array instead of a list
+      "content_data"              data => parsejson('[]');
+      "content_data"              data => mergedata("content_lines");
+
+      "contents_json"           string => format("%S", "content_data");
+
+  classes:
+      "has_known_hosts" expression => isvariable("args[known_hosts]");
+
+      "_known_hosts_$(id)_error"
+      expression => "file:edit_file_ssh_known_hosts_$(id)_error",
+           scope => "namespace";
+
+      "_known_hosts_$(id)_repaired"
+      expression => "file:edit_file_ssh_known_hosts_$(id)_repaired",
+      ifvarclass => "!known_hosts_$(id)_error",
+           scope => "namespace";
+
+      "_known_hosts_$(id)_kept"
+      expression => "file:edit_file_ssh_known_hosts_$(id)_kept|!has_known_hosts",
+           scope => "namespace";
+
+      "_known_hosts_$(id)_ok"
+      expression => "file:edit_file_ssh_known_hosts_$(id)_ok|!has_known_hosts",
+           scope => "namespace";
+
+  methods:
+    has_known_hosts::
+      "edit_file"         usebundle => file:edit_file('{
+        "id":                   "ssh_known_hosts_$(id)",
+        "path":                 "$(sshdir)/known_hosts",
+        "owner":                "$(user)",
+        "mode":                 "644",
+        "create":               "true",
+        "contents":             $(contents_json)
+      }');
+}
+
+bundle agent _authorized_keys(id, args)
+{
+  vars:
+      "user"                string => "$(args[user])";
+      "sshdir"              string => "$(args[sshdir])";
+      "authorized_keys"       data => mergedata("args[authorized_keys]");
+
+      "k"                         slist => getindices("authorized_keys");
+      "key[$(id)][$(k)]"         string => readfile("$(authorized_keys[$(k)][keyfile])", 4095);
+      "opt[$(id)][$(k)]"         string => "";
+      "opt[$(id)][$(k)]"         string => concat(join(",", "authorized_keys[$(k)][options]"),
+                                                 " "),
+                            ifvarclass => isvariable("authorized_keys[$(k)][options]");
+      "contents_$(id)[$(k)]"    string => "$(opt[$(id)][$(k)])$(key[$(id)][$(k)])";
+      "content_lines"            slist => getvalues("contents_$(id)");
+      "content_lines"            slist => sort("content_lines", "lex");
+      # Content lines must be converted to a data container, otherwise
+      # format() will output an array instead of a list
+      "content_data"              data => parsejson('[]');
+      "content_data"              data => mergedata("content_lines");
+      "contents"                string => format("%S", "content_data");
+
+  classes:
+      "has_authorized_keys" expression => isvariable("args[authorized_keys]");
+
+      "_authorized_keys_$(id)_error"
+        expression => "file:edit_file_ssh_authorized_keys_$(id)_error",
+             scope => "namespace";
+
+      "_authorized_keys_$(id)_repaired"
+        expression => "file:edit_file_ssh_authorized_keys_$(id)_repaired",
+             scope => "namespace";
+
+      "_authorized_keys_$(id)_kept"
+        expression => "file:edit_file_ssh_authorized_keys_$(id)_kept|!has_authorized_keys",
+             scope => "namespace";
+
+      "_authorized_keys_$(id)_ok"
+        expression => "file:edit_file_ssh_authorized_keys_$(id)_ok|!has_authorized_keys",
+             scope => "namespace";
+
+  methods:
+    has_authorized_keys::
+      "edit_file"         usebundle => file:edit_file('{
+        "id":                   "ssh_authorized_keys_$(id)",
+        "path":                 "$(sshdir)/authorized_keys",
+        "owner":                "$(user)",
+        "mode":                 "644",
+        "create":               "true",
+        "contents":             $(contents)
+      }');
+}
+
+bundle agent _keypair(id, args)
+{
+  classes:
+      "has_keypair" expression => isvariable("args[keypair]");
+
+    has_keypair::
+      "private_key_error" not => isvariable("args[keypair][private_key]");
+      "public_key_error" not => isvariable("args[keypair][public_key]");
+
+    default:any::
+      "_keypair_$(id)_error"
+                or => {
+                        "private_key_error",
+                        "public_key_error",
+                        "class:batch_ssh__keypair_$(id)_error",
+                      },
+             scope => "namespace";
+
+      "_keypair_$(id)_repaired"
+        expression => "class:batch_ssh__keypair_$(id)_repaired",
+             scope => "namespace";
+
+      "_keypair_$(id)_kept"
+        expression => "class:batch_ssh__keypair_$(id)_kept|!has_keypair",
+             scope => "namespace";
+
+      "_keypair_$(id)_ok"
+        expression => "class:batch_ssh__keypair_$(id)_ok|!has_keypair",
+             scope => "namespace";
+
+  methods:
+    has_keypair::
+      "private_key_file_$(id)"      usebundle => file:copy_file('{
+        "id":                       "ssh__keypair_private_key_$(id)",
+        "path":                     "$(args[sshdir])/id_rsa",
+        "source":                   "$(args[keypair][private_key])",
+        "owner":                    "$(args[user])",
+        "mode":                     "600"
+      }'), ifvarclass => "!_keypair_$(id)_error";
+
+      "public_key_file_$(id)"       usebundle => file:copy_file('{
+        "id":                       "ssh__keypair_public_key_$(id)",
+        "path":                     "$(args[sshdir])/id_rsa.pub",
+        "source":                   "$(args[keypair][public_key])",
+        "owner":                    "$(args[user])",
+        "mode":                     "644"
+      }'), ifvarclass => "!_keypair_$(id)_error";
+
+      "batch_$(id)"                 usebundle => class:batch("ssh__keypair_$(id)", '[
+        "file:copy_file_ssh__keypair_private_key_$(id)",
+        "file:copy_file_ssh__keypair_public_key_$(id)",
+      ]'), ifvarclass => "!_keypair_$(id)_error";
+
+  reports:
+    private_key_error::
+      "ERROR: ssh:edit_user expected field 'keypair[private_key]' in arguments";
+    public_key_error::
+      "ERROR: ssh:edit_user expected field 'keypair[public_key]' in arguments";
+}

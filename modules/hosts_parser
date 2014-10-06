@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import json
+import sys
+
+class HostEntry(object):
+    def __init__(self, ip, hostnames):
+        self.ip = ip
+        self.hostnames = hostnames
+
+    @property
+    def data(self):
+        data = {}
+        data["ip"] = "{0:<20}".format(self.ip)
+        data["hostnames"] = " ".join(self.hostnames)
+        return data
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.errors = []
+        self.local_entry = None
+        self.lan_entries = []
+
+    def parse(self, args):
+        if len(args) != 2:
+            self.errors.append(("Module hosts_parser must be "
+                "invoked with exactly one argument: A JSON representation "
+                "of host file entries"))
+            return
+
+        try:
+             module_args = json.loads(args[1])
+        except ValueError as e:
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        # Ensure arguments are a dictionary
+        if type(module_args) != dict:
+            self.errors.append(
+                ("Module hosts_parser is expected to be "
+                 "invoked with a JSON dictionary but received '{0}'"
+                ).format(args))
+            return
+
+        #
+        # Parse IP address
+        #
+        if "ip" in module_args:
+            ip_arg = module_args["ip"]
+            if not isinstance(ip_arg, basestring):
+                self.errors.append(
+                    ("Argument key 'ip' is expected to be a string but "
+                     "received '{0}'"
+                    ).format(json.dumps(ip_arg)))
+                # TODO: Check that ip_arg is a valid IP address
+
+        #
+        # Parse aliases
+        #
+        if "aliases" in module_args:
+            if not "ip" in module_args:
+                self.errors.append(
+                    ("Argument key 'aliases' was provided without argument "
+                     "key 'ip'"
+                    ))
+            alias_args = module_args["aliases"]
+            if type(alias_args) != list:
+                self.errors.append(
+                    ("Argument key 'aliases' is expected to be a list but "
+                     "received '{0}'"
+                    ).format(json.dumps(alias_args)))
+
+        #
+        # Create entry for host aliases
+        #
+        if ip_arg and alias_args:
+            self.local_entry = HostEntry(ip_arg, alias_args)
+
+        #
+        # Parse LAN entries
+        #
+        if "lan" in module_args:
+            lan_args = module_args["lan"]
+            if type(lan_args) != dict:
+                self.errors.append(
+                    ("Argument key 'lan' is expected to be a dictionary but "
+                     "received '{0}'"
+                    ).format(json.dumps(lan_args)))
+            else:
+                for lan_ip, lan_hostnames in lan_args.iteritems():
+                    # TODO: Check that lan_ip is a valid IP address
+                    if type(lan_hostnames) != list:
+                        self.errors.append(
+                            ("LAN entry for '{0}' is expected to be a list "
+                             "but received '{1}'"
+                            ).format(lan_ip, json.dumps(lan_hostnames)))
+                        continue
+                    self.lan_entries.append(HostEntry(lan_ip, lan_hostnames))
+
+def main():
+    errors = []
+
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+
+    if argparser.errors:
+        errors.extend(argparser.errors)
+    else:
+        localhost_ipv4 = HostEntry("127.0.0.1",
+            [
+                "localhost", "localhost.localdomain",
+                "localhost4", "localhost4.localdomain4"
+            ])
+
+        localhost_ipv6 = HostEntry("::1",
+            [
+                "localhost", "localhost.localdomain",
+                "localhost6", "localhost6.localdomain6"
+            ])
+
+        # Create result data
+        data = []
+        data.append(localhost_ipv4.data)
+        data.append(localhost_ipv6.data)
+        if argparser.local_entry:
+            data.append(argparser.local_entry.data)
+        data.extend(sorted([ h.data for h in argparser.lan_entries ],
+                             key=lambda d: d["ip"]))
+
+    if errors:
+        print("+hosts_parser_error")
+        print("%errors=" + json.dumps(errors))
+    else:
+        print("+hosts_parser_ok")
+        print("%data=" + json.dumps(data, sort_keys=True))
+
+if __name__ == "__main__":
+    main()

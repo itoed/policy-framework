@@ -1,0 +1,66 @@
+# JDK
+#
+
+body file control
+{
+  namespace => "jdk";
+     inputs => {
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"         slist => { "config" };
+
+  vars:
+      "version"     string => "$(info[version])",
+                ifvarclass => isvariable("info[version]");
+}
+
+bundle agent control
+{
+  meta:
+      "tags"        slist => { "control" };
+
+  classes:
+      "control_error"
+      expression => "$(package[error])",
+           scope => "namespace";
+
+      "control_repaired"
+      expression => "$(package[repaired])",
+           scope => "namespace";
+
+      "control_kept"
+      expression => "$(package[kept])",
+           scope => "namespace";
+
+      "control_ok"
+      expression => "$(package[ok])",
+           scope => "namespace";
+
+  methods:
+      "package"     usebundle => package:yum_addupdate('{
+        "name":     "jdk",
+        "version":  "$(config.version)"
+      }');
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"            slist => { "validation" };
+
+  classes:
+      "has_version"   expression => isvariable("jdk:config.version");
+
+      "validation_ok"
+      expression => "has_version",
+           scope => "namespace";
+
+  reports:
+    !has_version::
+      "ERROR: JDK version is missing";
+}

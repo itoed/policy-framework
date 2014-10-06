@@ -1,0 +1,55 @@
+# OPENSSL
+#
+
+body file control
+{
+  namespace => "openssl";
+  inputs => {
+    "$(inputs:components.common[package])",
+  };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags" slist => { "config" };
+
+  vars:
+      "version" string => "$(info[version])",
+        ifvarclass => isvariable("info[version]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags" slist => { "validation" };
+
+  classes:
+      "version_error" not => isvariable("openssl:config.version");
+
+      "validation_ok"
+        expression => "!version_error",
+             scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: OpenSSL expected field 'version'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags" slist => { "control" };
+
+  classes:
+      "error" expression => "package:yum_addupdate_openssl_error", scope => "namespace";
+      "repaired" expression => "package:yum_addupdate_openssl_repaired", scope => "namespace";
+      "kept" expression => "package:yum_addupdate_openssl_kept", scope => "namespace";
+      "ok" expression => "package:yum_addupdate_openssl_ok", scope => "namespace";
+
+  methods:
+      "openssl" usebundle => package:yum_addupdate('{
+        "name": "openssl",
+        "version": "$(config.version)"
+      }');
+}

@@ -1,0 +1,104 @@
+# USER TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[user])",
+               };
+}
+
+bundle agent A01_editUser_argsHaveUndefinedVar_noClassesSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  classes:
+      "no_classes"
+      expression => classmatch("user:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "edit_user"         usebundle => user:edit_user('{
+        "user":           "$(not_a_user)"
+      }');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:no_classes");
+}
+
+bundle agent A02_editUser_argsMissingUser_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_user"         usebundle => user:edit_user('{
+        "id":             "should-fail"
+      }');
+
+      "error"     usebundle => assert_class("user:edit_user_should_fail_error");
+      "kept"      usebundle => assert_not_class("user:edit_user_should_fail_kept");
+      "repaired"  usebundle => assert_not_class("user:edit_user_should_fail_repaired");
+      "ok"        usebundle => assert_not_class("user:edit_user_should_fail_ok");
+}
+
+bundle agent A03_editUser_nonexistentUser_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_user"         usebundle => user:edit_user('{
+        "username":       "bugs_bunny_78",
+        "homedir":        "/tmp"
+      }');
+
+      "error"     usebundle => assert_class("user:edit_user_bugs_bunny_78_error");
+      "kept"      usebundle => assert_not_class("user:edit_user_bugs_bunny_78_kept");
+      "repaired"  usebundle => assert_not_class("user:edit_user_bugs_bunny_78_repaired");
+      "ok"        usebundle => assert_not_class("user:edit_user_bugs_bunny_78_ok");
+}
+
+bundle agent A04_editUser_nonexistentHomedir_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_user"         usebundle => user:edit_user('{
+        "username":       "bugs_bunny_78",
+        "homedir":        "/tmp"
+      }');
+
+      "error"     usebundle => assert_class("user:edit_user_bugs_bunny_78_error");
+      "kept"      usebundle => assert_not_class("user:edit_user_bugs_bunny_78_kept");
+      "repaired"  usebundle => assert_not_class("user:edit_user_bugs_bunny_78_repaired");
+      "ok"        usebundle => assert_not_class("user:edit_user_bugs_bunny_78_ok");
+}
+
+bundle agent A05_editUser_nonexistentGroup_errorClassIsSet
+{
+  meta:
+      "tags"             slist => { "test" };
+
+  methods:
+      "edit_user"             usebundle => user:edit_user('{
+        "username":           "nobody",
+        "homedir":            "/tmp",
+        "groups_secondary":   [ "acme_78" ]
+      }');
+
+      "error"     usebundle => assert_class("user:edit_user_nobody_error");
+      "kept"      usebundle => assert_not_class("user:edit_user_nobody_kept");
+      "repaired"  usebundle => assert_not_class("user:edit_user_nobody_repaired");
+      "ok"        usebundle => assert_not_class("user:edit_user_nobody_ok");
+}

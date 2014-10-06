@@ -1,0 +1,4 @@
+body runagent control
+{
+  hosts => { "$(policy.acl)" };
+}

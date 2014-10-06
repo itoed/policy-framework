@@ -1,0 +1,631 @@
+# JENKINS
+#
+
+#
+# TODO: Modify masterfiles/setup.cf so as to only execute the validate and
+# control bundles of a dependency when it is present in a "meta => dependency" variable.
+# That way it's possible to include it in inputs to use common functions.
+# This is better than the shiro_hasher and createrepo classes in nexus control.
+#
+body file control
+{
+  namespace => "jenkins";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[nexus_client])",
+                "$(inputs:components.common[package])",
+                "$(inputs:components.common[password])",
+                "$(inputs:components.common[service])",
+                "$(inputs:components.common[user])",
+                "$(inputs:components.common[xml])",
+                "$(inputs:components.apps[gem])",
+                "$(inputs:components.apps[git])",
+                "$(inputs:components.apps[maven])",
+                "$(inputs:components.apps[py_bcrypt])",
+                "$(inputs:components.apps[python_lxml])",
+                "$(inputs:components.apps[rpmbuild])",
+                "$(inputs:components.apps[ssh])",
+                "$(inputs:components.os[hosts])",
+                "$(inputs:components.os[iptables])",
+                "$(inputs:components.os[network])",
+                "$(inputs:components.os[swap])",
+                "$(inputs:components.os[yum])",
+                "$(inputs:components.platforms[jdk])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+          "network",
+          "hosts",
+          "iptables",
+          "swap",
+          "yum",
+          "jdk",
+          "nexus_client",
+          "git",
+          "maven",
+          "rpmbuild",
+          "py_bcrypt",
+          "python_lxml",
+        },
+        meta => { "dependencies" };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags" slist => { "config" };
+
+  vars:
+      "port" string => "8080",
+        ifvarclass => not(isvariable("port"));
+
+      "port" string => "$(info[port])",
+        ifvarclass => isvariable("info[port]");
+
+      "version" string => "$(info[version])",
+        ifvarclass => isvariable("info[version]");
+
+      "release" string => "$(info[release])",
+        ifvarclass => isvariable("info[release]");
+
+      "homedir" string => "/var/lib/jenkins",
+        ifvarclass => not(isvariable("homedir"));
+      "homedir" string => "$(info[homedir])",
+        ifvarclass => isvariable("info[homedir]");
+
+      "owner" string => "jenkins",
+        ifvarclass => not(isvariable("owner"));
+      "owner" string => "$(info[owner])",
+        ifvarclass => isvariable("info[owner]");
+
+      "url" string => "$(info[url])",
+        ifvarclass => isvariable("info[url]");
+
+      "private_key" string => "$(info[private_key])",
+        ifvarclass => isvariable("info[private_key]");
+
+      "public_key" string => "$(info[public_key])",
+        ifvarclass => isvariable("info[public_key]");
+
+      "known_hosts" data => mergedata("info[known_hosts]"),
+        ifvarclass => isvariable("info[known_hosts]");
+
+      "maven_installations" data => mergedata("info[maven_installations]"),
+        ifvarclass => isvariable("info[maven_installations]");
+
+      "maven_settings" data => mergedata("info[maven_settings]"),
+        ifvarclass => isvariable("info[maven_settings]");
+
+      "admin_email" string => "$(info[admin][email])",
+        ifvarclass => isvariable("info[admin][email]");
+
+      "admin_password" string => "$(info[admin][password])",
+        ifvarclass => isvariable("info[admin][password]");
+
+      "bundler_settings" data => mergedata("info[bundler_settings]"),
+        ifvarclass => isvariable("info[bundler_settings]");
+
+      "templatedir" string => "$(inputs:dirs.templatedir)/daemons/jenkins";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags" slist => { "validation" };
+
+  classes:
+      "version_error" not => isvariable("jenkins:config.version");
+      "release_error" not => isvariable("jenkins:config.release");
+      "url_error" not => isvariable("jenkins:config.url");
+      "email_error" not => isvariable("jenkins:config.admin_email");
+      "has_private_key" expression => isvariable("jenkins:config.private_key");
+      "has_public_key" expression => isvariable("jenkins:config.public_key");
+      "keypar_error"
+        or => {
+          "has_private_key.!has_public_key",
+          "has_public_key.!has_private_key",
+        };
+
+      "validation_ok"
+        and => {
+            "!version_error",
+            "!release_error",
+            "!url_error",
+            "!email_error",
+            "!keypair_error",
+        },
+        scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected field 'version'";
+    release_error::
+      "ERROR: Expected field 'release'";
+    url_error::
+      "ERROR: Expected field 'url'";
+    email_error::
+      "ERROR: Expected field 'admin[email]'";
+    keypair_error::
+      "ERROR: Jenkins keypair is invalid";
+}
+
+bundle agent control
+{
+  meta:
+      "tags" slist => { "control" };
+
+  classes:
+      "error" expression => "class:batch_jenkins_error", scope => "namespace";
+      "repaired" expression => "class:batch_jenkins_repaired", scope => "namespace";
+      "kept" expression => "class:batch_jenkins_kept", scope => "namespace";
+      "ok" expression => "class:batch_jenkins_ok", scope => "namespace";
+
+  methods:
+      "package" usebundle => package:yum_addupdate('{
+        "name": "jenkins",
+        "version": "$(config.version)-$(config.release)",
+        "arch": "noarch"
+      }');
+
+    package:yum_addupdate_jenkins_ok::
+      "sysconfig_file" usebundle => file:edit_file('{
+        "id": "jenkins_sysconfig_file",
+        "path": "/etc/sysconfig/jenkins",
+        "quoted_values": {
+          "JENKINS_PORT": "$(config.port)"
+        }
+      }');
+
+      "homedir" usebundle => file:edit_dir('{
+        "id": "jenkins_homedir",
+        "path": "$(config.homedir)",
+        "owner": "jenkins"
+      }');
+
+    file:edit_dir_jenkins_homedir_ok::
+      "jenkins_home_files" usebundle => jenkins_home_files;
+
+    class:batch_jenkins_home_files_ok::
+      "config_batch" usebundle => class:batch("jenkins_config", '[
+        "package:yum_addupdate_jenkins",
+        "file:edit_file_jenkins_sysconfig_file",
+        "file:edit_dir_jenkins_homedir",
+        "class:batch_jenkins_home_files",
+      ]');
+
+    class:batch_jenkins_config_ok::
+      "services" usebundle => services;
+
+    default:any::
+      "batch" usebundle => class:batch("jenkins", '[
+        "class:batch_jenkins_config",
+        "jenkins:service",
+      ]');
+
+  reports:
+    kept.default:policy_debug_mode::
+      "Jenkins is as promised";
+    repaired::
+      "Jenkins was repaired";
+    error::
+      "ERROR: Jenkins could not be repaired";
+}
+
+bundle agent jenkins_home_files
+{
+  vars:
+      "home" string => "$(config.homedir)";
+      "templatedir" string => "$(config.templatedir)";
+      "known_hosts_json" string => format("%S", "jenkins:config.known_hosts");
+
+  classes:
+      "restart_required_for_home_files"
+        or => {
+          "file:edit_file_jenkins_config_xml_repaired",
+        },
+        scope => "namespace";
+
+  methods:
+      "jenkins_user" usebundle => user:edit_user('{
+        "username": "jenkins",
+        "homedir": "$(home)"
+      }');
+
+      "edit_ssh_user" usebundle => ssh:edit_user('{
+        "user": "jenkins",
+        "sshdir": "$(home)/.ssh",
+        "known_hosts": $(known_hosts_json),
+        "keypair": {
+          "private_key": "$(config.private_key)",
+          "public_key": "$(config.public_key)",
+        }
+      }');
+
+      "config_xml" usebundle => config_xml;
+      "location_xml" usebundle => location_xml;
+      "maven_tasks_file" usebundle => maven_tasks_file;
+      "maven_settings" usebundle => maven_settings;
+      "bundler_config_file" usebundle => bundler_config_file;
+
+      "users_dir" usebundle => file:edit_dir('{
+        "id": "jenkins_users_dir",
+        "path": "$(home)/users",
+        "owner": "jenkins",
+        "create": "true"
+      }');
+
+      "plugins_dir" usebundle => file:edit_dir('{
+        "id": "jenkins_plugins_dir",
+        "path": "$(home)/plugins",
+        "owner": "jenkins",
+        "create": "true"
+      }');
+
+    file:edit_dir_jenkins_users_dir_ok::
+      "user_files" usebundle => user_files;
+    file:edit_dir_jenkins_plugins_dir_ok::
+      "plugin_files" usebundle => plugin_files;
+
+    default:any::
+      "batch" usebundle => class:batch("jenkins_home_files", '[
+        "user:edit_user_jenkins",
+        "ssh:edit_user_jenkins",
+        "file:edit_file_jenkins_config_xml",
+        "file:edit_file_jenkins_location_xml",
+        "file:edit_file_jenkins_maven_tasks_file",
+        "file:edit_dir_jenkins_users_dir",
+        "file:edit_dir_jenkins_plugins_dir",
+        "class:batch_jenkins_user_files"
+        "class:batch_jenkins_plugin_files"
+        "jenkins:bundler_config_file",
+        "jenkins:maven_settings",
+      ]'), useresult => "jenkins_home_files";
+}
+
+bundle agent user_files
+{
+  vars:
+      "users" string => "$(config.homedir)/users";
+
+  methods:
+      "user_admin_dir" usebundle => file:edit_dir('{
+        "id": "jenkins_user_admin_dir",
+        "path": "$(users)/admin",
+        "owner": "jenkins",
+        "create": "true"
+      }');
+
+      "user_admin_password" usebundle => user_admin_encrypted_password,
+        useresult => "encrypted_password";
+
+      "admin_config_xml" usebundle => file:edit_file('{
+        "id": "jenkins_user_admin_config_xml",
+        "path": "$(users)/admin/config.xml",
+        "create": "true",
+        "owner": "jenkins",
+        "template": "$(config.templatedir)/users/admin/config.xml",
+        "template_data": {
+          "password": "$(encrypted_password[result])"
+        }
+      }');
+
+      "batch" usebundle => class:batch("jenkins_user_files", '[
+        "file:edit_dir_jenkins_user_admin_dir",
+        "file:edit_file_jenkins_user_admin_config_xml",
+      ]');
+}
+
+bundle agent user_admin_encrypted_password
+{
+  vars:
+      "config_xml" string => "$(config.homedir)/users/admin/config.xml";
+      "admin_password" string => "$(config.admin_password)";
+      "password_xpath" string => concat(
+        "/user/properties/hudson.security.",
+        "HudsonPrivateSecurityRealm_-Details/passwordHash/text()"
+      );
+
+  classes:
+      "password_extracted"
+        expression => regextract("#jbcrypt:(.*)", "$(find_password[result])", "matches"),
+        ifvarclass => "$(find_password[found])";
+
+      "password_not_extracted"
+        not => "password_extracted",
+        ifvarclass => "$(find_password[found])";
+
+      "encrypt_password"
+        or => {
+          "$(find_password[not_found])", "password_not_extracted",
+          "$(verify_password[no_match])"
+        };
+
+      "keep_password"
+        expression => "$(verify_password[match])";
+
+  methods:
+      "find" usebundle => xml:find_xpath("$(config_xml)", "$(password_xpath)"),
+        useresult => "find_password";
+
+    password_extracted::
+      "verify"
+        usebundle => password:verify_password("$(admin_password)", "$(matches[1])"),
+        useresult => "verify_password";
+
+    encrypt_password::
+      "encrypt" usebundle => password:encrypt_password("$(admin_password)"),
+        useresult => "encrypt_password";
+
+  reports:
+    keep_password::
+      "$(matches[1])"
+        bundle_return_value_index => "result";
+
+    encrypt_password::
+      "$(encrypt_password[result])"
+        bundle_return_value_index => "result";
+}
+
+#
+# NOTE: Jenkins does not add a newline at the end of the file
+# If the template file is edited in vim, make sure there is no trailing newline
+#
+bundle agent config_xml
+{
+  methods:
+      "edit_file" usebundle => file:edit_file('{
+        "id": "jenkins_config_xml",
+        "path": "$(config.homedir)/config.xml",
+        "mode": "644",
+        "owner": "$(config.owner)",
+        "create": "true",
+        "template": "$(config.templatedir)/config.xml",
+        "template_data": {
+          "version": "$(config.version)"
+        }
+      }');
+}
+
+#
+# NOTE: Jenkins does not add a newline at the end of the file
+# If the template file is edited in vim, make sure there is no trailing newline
+#
+bundle agent location_xml
+{
+  vars:
+      "path" string => concat("$(config.homedir)/jenkins.model.",
+        "JenkinsLocationConfiguration.xml");
+      "template" string => concat("$(config.templatedir)/jenkins.model.",
+        "JenkinsLocationConfiguration.xml");
+
+  methods:
+      "edit_file" usebundle => file:edit_file('{
+        "id": "jenkins_location_xml",
+        "path": "$(path)",
+        "mode": "644",
+        "owner": "$(config.owner)",
+        "create": "true",
+        "template": "$(template)",
+        "template_data": {
+          "emailAddress": "$(config.admin_email)",
+          "jenkinsUrl": "$(config.url)/"
+        }
+      }');
+}
+
+#
+# NOTE: Jenkins does not add a newline at the end of the file
+# If the template file is edited in vim, make sure there is no trailing newline
+#
+bundle agent maven_tasks_file
+{
+  vars:
+      "installations" data => mergedata("jenkins:config.maven_installations");
+      "i" slist => getindices("installations");
+      "ids[$(i)]" string => canonify("$(i)");
+      "names[$(ids[$(i)])]" string => "$(i)";
+      "homes[$(ids[$(i)])]" string => "$(installations[$(i)])";
+      "id" slist => getvalues("ids");
+
+      "installations_$(id)" data => parsejson('[
+        {
+          "name": "$(names[$(id)])",
+          "home": "$(homes[$(id)])"
+        }
+      ]');
+
+      "installations_data" data => parsejson('[]');
+      "installations_data" data => mergedata("installations_data", "installations_$(id)");
+
+      "installations_json" string => storejson("installations_data");
+
+  methods:
+      "edit_file" usebundle => file:edit_file('{
+        "id": "jenkins_maven_tasks_file",
+        "path": "$(config.homedir)/hudson.tasks.Maven.xml",
+        "mode": "644",
+        "owner": "$(config.owner)",
+        "create": "true",
+        "template": "$(config.templatedir)/hudson.tasks.Maven.xml",
+        "template_data": {
+          "installations":  $(installations_json)
+        }
+      }');
+}
+
+bundle agent plugin_files
+{
+  vars:
+      "plugins" string => "$(config.homedir)/plugins";
+
+  methods:
+      "git" usebundle => nexus_client:download('{
+        "id" "jenkins_git_plugin",
+        "output_file": "$(plugins)/git.jpi",
+        "owner": "jenkins",
+        "repo": "depot",
+        "group_id": "net.fghijk.jenkins.plugins",
+        "artifact_id": "git",
+        "version": "2.2.1",
+        "packaging": "jpi"
+      }');
+
+      "git_client" usebundle => nexus_client:download('{
+        "id" "jenkins_git_client_plugin",
+        "output_file": "$(plugins)/git-client.jpi",
+        "owner": "jenkins",
+        "repo": "depot",
+        "group_id": "net.fghijk.jenkins.plugins",
+        "artifact_id": "git-client",
+        "version": "1.9.1",
+        "packaging": "jpi"
+      }');
+
+      "scm_api" usebundle => nexus_client:download('{
+        "id" "jenkins_scm_api_plugin",
+        "output_file": "$(plugins)/scm-api.jpi",
+        "owner": "jenkins",
+        "repo": "depot",
+        "group_id": "net.fghijk.jenkins.plugins",
+        "artifact_id": "scm-api",
+        "version": "0.2",
+        "packaging": "jpi"
+      }');
+
+      "credentials" usebundle => nexus_client:download('{
+        "id" "jenkins_credentials_plugin",
+        "output_file": "$(plugins)/credentials.jpi",
+        "owner": "jenkins",
+        "repo": "depot",
+        "group_id": "net.fghijk.jenkins.plugins",
+        "artifact_id": "credentials",
+        "version": "1.13",
+        "packaging": "jpi"
+      }');
+
+      "credentials_pin" usebundle => file:edit_file('{
+        "id" "jenkins_credentials_pin",
+        "path": "$(plugins)/credentials.jpi.pinned",
+        "owner": "jenkins",
+        "create": "true"
+      }');
+
+      "ssh_credentials" usebundle => nexus_client:download('{
+        "id" "jenkins_ssh_credentials_plugin",
+        "output_file": "$(plugins)/ssh-credentials.jpi",
+        "owner": "jenkins",
+        "repo": "depot",
+        "group_id": "net.fghijk.jenkins.plugins",
+        "artifact_id": "ssh-credentials",
+        "version": "1.6.1",
+        "packaging": "jpi"
+      }');
+
+      "ssh_credentials_pin" usebundle => file:edit_file('{
+        "id": "jenkins_ssh_credentials_pin",
+        "path": "$(plugins)/ssh-credentials.jpi.pinned",
+        "owner": "jenkins",
+        "create": "true"
+      }');
+
+      "batch" usebundle => class:batch("jenkins_plugin_files", '[
+        "nexus_client:download_jenkins_git_plugin",
+        "nexus_client:download_jenkins_git_client_plugin",
+        "nexus_client:download_jenkins_scm_api_plugin",
+        "nexus_client:download_jenkins_credentials_plugin",
+        "file:edit_file_jenkins_credentials_pin",
+        "nexus_client:download_jenkins_ssh_credentials_plugin",
+        "file:edit_file_jenkins_ssh_credentials_pin",
+      ]');
+}
+
+bundle agent maven_settings
+{
+  vars:
+      "settings" string => format("%S", "jenkins:config.maven_settings"),
+        ifvarclass => isvariable("jenkins:config.maven_settings");
+
+  classes:
+      "has_maven_settings" expression => isvariable("jenkins:config.maven_settings");
+
+      "maven_settings_error"
+        expression => "maven:settings_xml_jenkins_error",
+        scope => "namespace";
+      "maven_settings_repaired"
+        expression => "maven:settings_xml_jenkins_repaired",
+        scope => "namespace";
+      "maven_settings_kept"
+        expression => "maven:settings_xml_jenkins_kept|!has_maven_settings",
+        scope => "namespace";
+      "maven_settings_ok"
+        expression => "maven:settings_xml_jenkins_ok|!has_maven_settings",
+        scope => "namespace";
+
+  methods:
+    has_maven_settings::
+      "settings_xml" usebundle => maven:settings_xml('{
+        "user": "jenkins",
+        "m2dir": "$(config.homedir)/.m2",
+        "settings": $(settings)
+      }');
+}
+
+bundle agent bundler_config_file
+{
+  vars:
+      "mirrors" string => format("%S", "jenkins:config.bundler_settings[mirrors]");
+
+  classes:
+      "has_bundler_settings" expression => isvariable("jenkins:config.bundler_settings");
+
+      "bundler_config_file_error"
+        expression => "gem:bundler_config_file_jenkins_error",
+        scope => "namespace";
+
+      "bundler_config_file_repaired"
+        expression => "gem:bundler_config_file_jenkins_repaired",
+        scope => "namespace";
+
+      "bundler_config_file_kept"
+        expression => "!has_bundler_settings|gem:bundler_config_file_jenkins_kept",
+        scope => "namespace";
+
+      "bundler_config_file_ok"
+        expression => "!has_bundler_settings|gem:bundler_config_file_jenkins_ok",
+        scope => "namespace";
+
+  methods:
+    has_bundler_settings::
+      "bundler_config_file" usebundle => gem:bundler_config_file('{
+        "homedir": "$(config.homedir)",
+        "user": "jenkins",
+        "mirrors": $(mirrors)
+      }');
+}
+
+bundle agent services
+{
+  classes:
+      "restart"
+        or => {
+          "restart_required_for_home_files",
+        };
+
+  services:
+    restart::
+      "jenkins"
+        service_policy => "restart",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+
+    !restart::
+      "jenkins"
+        service_policy => "start",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+}

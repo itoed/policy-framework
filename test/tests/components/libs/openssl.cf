@@ -1,0 +1,39 @@
+# OPENSSL TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.libs[openssl])",
+               };
+}
+
+bundle agent A1_validate_noVersion_isError
+{
+  meta:
+      "tags" slist => { "test" };
+
+  methods:
+      "validate" usebundle => openssl:validate;
+
+      "not_validation_ok" usebundle => assert_not_class("openssl:validation_ok");
+}
+
+bundle agent A2_validate_withVersion_noError
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "version": "1"
+      }');
+
+  methods:
+      "config" usebundle => openssl:config(@(info));
+      "validate" usebundle => openssl:validate;
+
+      "validation_ok" usebundle => assert_class("openssl:validation_ok");
+}

@@ -1,0 +1,37 @@
+# JDK TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.platforms[jdk])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => jdk:validate;
+      "ok"                usebundle => assert_not_class("jdk:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  methods:
+      "config"            usebundle => jdk:config(@(info));
+      "validate"          usebundle => jdk:validate;
+      "validation_ok"     usebundle => assert_class("jdk:validation_ok");
+}

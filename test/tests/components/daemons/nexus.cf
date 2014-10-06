@@ -1,0 +1,801 @@
+# NEXUS TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.daemons[nexus])",
+               };
+}
+
+bundle agent A01_config_securityXmlTemplateArgGiven_configVarMatches
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "security_xml_template":      "/tmp/security.xml"
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+
+      "assert"        usebundle => assert_string_equals("/tmp/security.xml",
+                                    "$(nexus:config.security_xml_template)");
+}
+
+bundle agent B01_validate_versionFieldMissing_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"          data => parsejson('{
+        "host":        "nexus.localhost",
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_not_class("nexus:validation_ok");
+}
+
+bundle agent B02_validate_validUsersArgs_validationOkClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "host":           "nexus.localhost",
+        "version":        "1",
+        "users": {
+          "admin": {
+            "firstName":  "Administrator",
+            "lastName":   "User",
+            "password":   "admin123",
+            "status":     "active",
+            "email":      "changeme@yourcompany.com"
+            "roles":      [ "nx-admin" ]
+          }
+        }
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_class("nexus:validation_ok");
+}
+
+bundle agent B03_validate_noHost_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1",
+        "users": {
+        }
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_not_class("nexus:validation_ok");
+}
+
+bundle agent B04_validate_emptyUsersArg_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "host":       "nexus.localhost",
+        "version":    "1",
+        "users": {
+        }
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_class("nexus:validation_ok");
+}
+
+bundle agent B05_config_emptyUserArg_validationOkClassIsNotSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"          data => parsejson('{
+        "host":           "nexus.localhost",
+        "version":        "1",
+        "users": {
+          "admin": {
+          }
+        }
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_not_class("nexus:validation_ok");
+}
+
+bundle agent B06_validate_oneValidUserAndOneInvalid_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "host":                     "nexus.localhost",
+        "version":                  "1",
+        "users": {
+          "admin": {
+            "firstName":            "Administrator",
+            "lastName":             "User",
+            "password":             "admin123",
+            "status":               "active",
+            "email":                "changeme@yourcompany.com"
+            "roles":                [ "nx-admin" ]
+          },
+          "bugs": {
+            "firstName":            "Bugs",
+            "lastName":             "Bunny",
+            "password":             "hello456",
+            "status":               "active",
+            "email":                "bugsbunny@example.com"
+          }
+        }
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_not_class("nexus:validation_ok");
+}
+
+bundle agent B07_validate_withHostAndVersion_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"          data => parsejson('{
+        "host":       "nexus.localhost",
+        "version":    "1"
+      }');
+
+  methods:
+      "config"        usebundle => nexus:config(@(info));
+      "validate"      usebundle => nexus:validate;
+
+      "assert"        usebundle => assert_class("nexus:validation_ok");
+}
+
+bundle agent C1_01_nexusXmlFile_fileDoesNotExist_createdWithMatchingContents
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected_file"         string =>
+                                    "$(knowledge.expected_dir)/nexus/nexus.xml";
+      "actual_file"           string => "$(knowledge.tmp_dir)/nexus.xml";
+
+      "info"                    data => parsejson('{
+        "host":                 "nexus.localhost",
+        "version":              "2.7.2-03",
+        "nexus_username":       "$(knowledge.env_user)",
+        "repositories": {
+          "central": {
+            "name":                 "Central",
+            "remote_url":           "http://repo1.maven.org/maven2/"
+          },
+          "apache-snapshots": {
+            "name":                 "Apache Snapshots",
+            "remote_url":           "http://repository.apache.org/snapshots/",
+            "repository_policy":    "SNAPSHOT"
+          },
+          "codehaus-snapshots": {
+            "name":                 "Codehaus Snapshots",
+            "remote_url":           "http://nexus.codehaus.org/snapshots/",
+            "repository_policy":    "SNAPSHOT"
+          },
+          "releases": {
+            "name":                 "Releases"
+          },
+          "snapshots": {
+            "name":                 "Snapshots",
+            "repository_policy":    "SNAPSHOT"
+          },
+          "thirdparty": {
+            "name":                 "3rd party"
+          },
+          "depot": {
+            "name":                 "FGHIJK Depot"
+          },
+          "centos-6": {
+            "name":                 "CentOS 6",
+            "remote_url":           "http://mirror.centos.org/centos/6.5/os/x86_64/"
+          },
+          "rpms": {
+            "name":                 "FGHIJK RPM Releases",
+            "type":                 "rpms"
+          },
+          "rubygems": {
+            "name":                 "RubyGems",
+            "remote_url":           "http://rubygems.org/",
+            "repository_policy":    "MIXED",
+            "provider_hint":        "rubygems-proxy"
+          }
+        },
+        "nexus_xml_file":       "$(actual_file)",
+        "nexus_xml_template":   "$(inputs:dirs.templatedir)/daemons/nexus/nexus.xml",
+        "config_parser_cmd":    "$(inputs:dirs.moduledir)/nexus_config_parser"
+      }');
+
+  methods:
+      "config"            usebundle => nexus:config(@(info));
+      "nexus_xml_file"    usebundle => nexus:nexus_xml_file;
+
+      "assert"            usebundle => assert_file_diff("$(expected_file)",
+                                                        "$(actual_file)");
+}
+
+bundle agent D01_securityXmlFile_doesNotExistAndUsersArgGiven_newFileContentsMatch
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"        string =>
+'<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    <user>
+      <id>bugs</id>
+      <firstName>Bugs</firstName>
+      <lastName>Bunny</lastName>
+      <password>$shiro1$SHA-512$1024$OND5TXX1QaCgm3r1cWmMVQ==$UoNVW7ZEJ7VWmfBdjysXX1Ix9spFMJqZd4ldIVDfAXVhN66FW8mPer6IdvMH4V+3ZhifY8U3NJyQeoVjMHR0ag==</password>
+      <status>active</status>
+      <email>bugsbunny@example.com</email>
+    </user>
+  </users>
+  <userRoleMappings>
+    <userRoleMapping>
+      <userId>bugs</userId>
+      <source>default</source>
+      <roles>
+        <role>tester</role>
+      </roles>
+    </userRoleMapping>
+  </userRoleMappings>
+</security>';
+
+      "confdir"               string => "$(knowledge.tmp_dir)/nexus/conf";
+      "security_xml_file"     string => "$(confdir)/security.xml";
+
+      "info"              data => parsejson('{
+        "host":                       "nexus.localhost",
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(security_xml_file)",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher",
+        "users": {
+          "bugs": {
+            "firstName":  "Bugs",
+            "lastName":   "Bunny",
+            "password":   "admin123",
+            "status":     "active",
+            "email":      "bugsbunny@example.com",
+            "roles":      [ "tester" ]
+          }
+        }
+      }');
+
+  files:
+      "$(confdir)/."
+      create => "true";
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "security_xml_file"   usebundle => nexus:security_xml_file;
+
+      "assert"              usebundle => assert_file_contents("$(expected)",
+                                    "$(security_xml_file)");
+}
+
+bundle agent D02_securityXmlFile_existsWithWrongPassword_passwordRepaired
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "existing"        string =>
+'<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    <user>
+      <id>admin</id>
+      <firstName>Administrator</firstName>
+      <lastName>User</lastName>
+      <password>$shiro1$SHA-512$1024$HLEUIuNQ+xFetwyK7+mW1A==$elpK/4AdSY0jciM/tzQrpffVowUdCM9NAFW4JIjXYMmlb+i7FCa6v7OuIHgkAK+8/YpBpk0tDc1jlum20I+k9A==</password>
+      <status>active</status>
+      <email>changeme@yourcompany.com</email>
+    </user>
+  </users>
+  <userRoleMappings>
+    <userRoleMapping>
+      <userId>admin</userId>
+      <source>default</source>
+      <roles>
+        <role>nx-admin</role>
+      </roles>
+    </userRoleMapping>
+  </userRoleMappings>
+</security>';
+
+      "expected"        string =>
+'<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    <user>
+      <id>admin</id>
+      <firstName>Administrator</firstName>
+      <lastName>User</lastName>
+      <password>$shiro1$SHA-512$1024$OND5TXX1QaCgm3r1cWmMVQ==$UoNVW7ZEJ7VWmfBdjysXX1Ix9spFMJqZd4ldIVDfAXVhN66FW8mPer6IdvMH4V+3ZhifY8U3NJyQeoVjMHR0ag==</password>
+      <status>active</status>
+      <email>changeme@yourcompany.com</email>
+    </user>
+  </users>
+  <userRoleMappings>
+    <userRoleMapping>
+      <userId>admin</userId>
+      <source>default</source>
+      <roles>
+        <role>nx-admin</role>
+      </roles>
+    </userRoleMapping>
+  </userRoleMappings>
+</security>';
+
+      "confdir"               string => "$(knowledge.tmp_dir)/nexus/conf";
+      "security_xml_file"     string => "$(confdir)/security.xml";
+
+      "info"              data => parsejson('{
+        "host":                       "nexus.localhost",
+        "version":                    "1",
+        "users": {
+          "admin": {
+            "firstName":                "Administrator",
+            "lastName":                 "User",
+            "password":                 "admin123",
+            "status":                   "active",
+            "email":                    "changeme@yourcompany.com",
+            "roles":                    [ "nx-admin" ]
+          }
+        },
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(security_xml_file)",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher"
+      }');
+
+  files:
+      "$(security_xml_file)"
+         create => "true",
+      edit_line => default:insert_lines("$(existing)");
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "validate"            usebundle => nexus:validate;
+      "security_xml_file"   usebundle => nexus:security_xml_file;
+
+      "assert"              usebundle => assert_file_contents("$(expected)",
+                                    "$(security_xml_file)");
+}
+
+bundle agent D03_securityXmlFile_fileCreated_repairedAndOkClassesSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "confdir"               string => "$(knowledge.tmp_dir)/nexus/conf";
+      "security_xml_file"     string => "$(confdir)/security.xml";
+
+      "info"              data => parsejson('{
+        "host":                         "nexus.localhost",
+        "users": {
+          "admin": {
+            "firstName":                "Administrator",
+            "lastName":                 "User",
+            "password":                 "admin123",
+            "status":                   "active",
+            "email":                    "changeme@yourcompany.com",
+            "roles":                    [ "nx-admin" ]
+          }
+        },
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(security_xml_file)",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher"
+      }');
+
+  files:
+      "$(confdir)/."
+      create => "true";
+
+  methods:
+      "config"            usebundle => nexus:config(@(info));
+      "security_xml_file" usebundle => nexus:security_xml_file;
+
+      "assert_repaired"   usebundle => assert_class("nexus:security_xml_file_repaired");
+      "assert_ok"         usebundle => assert_class("nexus:security_xml_file_ok");
+      "not_error"         usebundle => assert_not_class("nexus:security_xml_file_error");
+      "not_kept"          usebundle => assert_not_class("nexus:security_xml_file_kept");
+}
+
+bundle agent D04_securityXmlFile_fileRepaired_repairedAndOkClassesAreSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "existing"        string =>
+'<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    <user>
+      <id>admin</id>
+      <firstName>Administrator</firstName>
+      <lastName>User</lastName>
+      <password>$shiro1$SHA-512$1024$HLEUIuNQ+xFetwyK7+mW1A==$elpK/4AdSY0jciM/tzQrpffVowUdCM9NAFW4JIjXYMmlb+i7FCa6v7OuIHgkAK+8/YpBpk0tDc1jlum20I+k9A==</password>
+      <status>active</status>
+      <email>changeme@yourcompany.com</email>
+    </user>
+  </users>
+  <userRoleMappings>
+    <userRoleMapping>
+      <userId>admin</userId>
+      <source>default</source>
+      <roles>
+        <role>nx-admin</role>
+      </roles>
+    </userRoleMapping>
+  </userRoleMappings>
+</security>';
+
+      "confdir"               string => "$(knowledge.tmp_dir)/nexus/conf";
+      "security_xml_file"     string => "$(confdir)/security.xml";
+
+      "info"              data => parsejson('{
+        "host":                       "nexus.localhost",
+        "users": {
+          "admin": {
+            "firstName":              "Administrator",
+            "lastName":               "User",
+            "password":               "admin123",
+            "status":                 "active",
+            "email":                  "changeme@yourcompany.com",
+            "roles":                  [ "nx-admin" ]
+          }
+        },
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(security_xml_file)",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher"
+      }');
+
+  files:
+      "$(security_xml_file)"
+         create => "true",
+      edit_line => default:insert_lines("$(existing)");
+
+  methods:
+      "config"            usebundle => nexus:config(@(info));
+      "security_xml_file" usebundle => nexus:security_xml_file;
+
+      "assert_repaired"   usebundle => assert_class("nexus:security_xml_file_repaired");
+      "assert_ok"         usebundle => assert_class("nexus:security_xml_file_ok");
+      "not_error"         usebundle => assert_not_class("nexus:security_xml_file_error");
+      "not_kept"          usebundle => assert_not_class("nexus:security_xml_file_kept");
+}
+
+bundle agent D05_securityXmlFile_fileKept_keptAndOkClassesSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "existing"        string =>
+'<?xml version="1.0" encoding="UTF-8"?>
+<security>
+  <version>2.0.5</version>
+  <users>
+    <user>
+      <id>admin</id>
+      <firstName>Administrator</firstName>
+      <lastName>User</lastName>
+      <password>$shiro1$SHA-512$1024$OND5TXX1QaCgm3r1cWmMVQ==$UoNVW7ZEJ7VWmfBdjysXX1Ix9spFMJqZd4ldIVDfAXVhN66FW8mPer6IdvMH4V+3ZhifY8U3NJyQeoVjMHR0ag==</password>
+      <status>active</status>
+      <email>changeme@yourcompany.com</email>
+    </user>
+  </users>
+  <userRoleMappings>
+    <userRoleMapping>
+      <userId>admin</userId>
+      <source>default</source>
+      <roles>
+        <role>nx-admin</role>
+      </roles>
+    </userRoleMapping>
+  </userRoleMappings>
+</security>';
+
+      "confdir"               string => "$(knowledge.tmp_dir)/nexus/conf";
+      "security_xml_file"     string => "$(confdir)/security.xml";
+
+      "info"              data => parsejson('{
+        "host":                       "nexus.localhost",
+        "users": {
+          "admin": {
+            "firstName":              "Administrator",
+            "lastName":               "User",
+            "password":               "admin123",
+            "status":                 "active",
+            "email":                  "changeme@yourcompany.com",
+            "roles":                  [ "nx-admin" ]
+          }
+        },
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(security_xml_file)",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher"
+      }');
+
+  files:
+      "$(security_xml_file)"
+         create => "true",
+      edit_line => default:insert_lines("$(existing)");
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "security_xml_file"   usebundle => nexus:security_xml_file;
+
+      "assert_kept"   usebundle => assert_class("nexus:security_xml_file_kept");
+      "assert_ok"     usebundle => assert_class("nexus:security_xml_file_ok");
+      "not_repaired"  usebundle => assert_not_class("nexus:security_xml_file_repaired");
+      "not_error"     usebundle => assert_not_class("nexus:security_xml_file_error");
+}
+
+bundle agent D06_securityXmlFile_passwordHasherFails_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "host":                       "nexus.localhost",
+        "version":                    "1",
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(knowledge.tmp_dir)/security.xml",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher",
+        "users": {
+          "bugs": {
+            "firstName":  "Bugs",
+            "lastName":   "Bunny",
+            "password":   "not_admin123",
+            "status":     "active",
+            "email":      "bugsbunny@example.com",
+            "roles":      [ "tester" ]
+          }
+        }
+      }');
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "validate"            usebundle => nexus:validate;
+      "security_xml_file"   usebundle => nexus:security_xml_file;
+
+      "assert_error"  usebundle => assert_class("nexus:security_xml_file_error");
+      "not_repaired"  usebundle => assert_not_class("nexus:security_xml_file_repaired");
+      "not_kept"      usebundle => assert_not_class("nexus:security_xml_file_kept");
+      "not_ok"        usebundle => assert_not_class("nexus:security_xml_file_ok");
+}
+
+bundle agent D07_securityXmlFile_fileEditFailed_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "host":           "nexus.localhost",
+        "users": {
+          "admin": {
+            "firstName":  "Administrator",
+            "lastName":   "User",
+            "password":   "admin123",
+            "status":     "active",
+            "email":      "changeme@yourcompany.com"
+            "roles":      [ "nx-admin" ]
+          }
+        },
+        "nexus_username":             "$(knowledge.env_user)",
+        "security_xml_file":          "$(knowledge.tmp_dir)/nonexistent/security.xml",
+        "password_hasher_command":    "$(knowledge.mocks_dir)/shiro-hasher"
+      }');
+
+  methods:
+      "config"            usebundle => nexus:config(@(info));
+      "security_xml_file" usebundle => nexus:security_xml_file;
+
+      "assert_error"  usebundle => assert_class("nexus:security_xml_file_error");
+      "not_repaired"  usebundle => assert_not_class("nexus:security_xml_file_repaired");
+      "not_kept"      usebundle => assert_not_class("nexus:security_xml_file_kept");
+      "not_ok"        usebundle => assert_not_class("nexus:security_xml_file_ok");
+}
+
+bundle agent E01_outreachPlugin_jarAndDirExist_bothRemoved
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"                    data => parsejson('{
+        "pluginsdir":           "$(knowledge.tmp_dir)",
+        "version":              "1.1.1-1",
+        "outreach_plugin": {
+          "delete":             true
+        }
+      }');
+
+      "dirpath"     string => "$(knowledge.tmp_dir)/nexus-outreach-plugin-1.1.1-1";
+      "jarpath"     string => "$(dirpath)/nexus-outreach-plugin-1.1.1-1.jar";
+
+  files:
+      "$(dirpath)/."
+      create => "true";
+
+      "$(jarpath)"
+      create => "true";
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "outreach_plugin"     usebundle => nexus:outreach_plugin;
+
+      "assert_not_dir"      usebundle => assert_not_file("$(dirpath)");
+      "assert_not_jar"      usebundle => assert_not_file("$(jarpath)");
+}
+
+bundle agent E02_outreachPlugin_nonExistent_keptAndOkClassesSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "pluginsdir":     "$(knowledge.tmp_dir)",
+        "version":        "1.1.1-1",
+        "outreach_plugin": {
+          "delete":             true
+        }
+      }');
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "outreach_plugin"     usebundle => nexus:outreach_plugin;
+
+      "assert_kept"   usebundle => assert_class("nexus:outreach_plugin_kept");
+      "assert_ok"     usebundle => assert_class("nexus:outreach_plugin_ok");
+      "not_error"     usebundle => assert_not_class("nexus:outreach_plugin_error");
+      "not_repaired"  usebundle => assert_not_class("nexus:outreach_plugin_repaired");
+}
+
+bundle agent E03_outreachPlugin_directoryExistsButNotJar_repairedAndOkClassesSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "pluginsdir":     "$(knowledge.tmp_dir)",
+        "version":        "1.1.1-1",
+        "outreach_plugin": {
+          "delete":             true
+        }
+      }');
+
+      "dirpath"     string => "$(knowledge.tmp_dir)/nexus-outreach-plugin-1.1.1-1";
+
+  files:
+      "$(dirpath)/."
+      create => "true";
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "outreach_plugin"     usebundle => nexus:outreach_plugin;
+
+      "assert_repaired"     usebundle => assert_class("nexus:outreach_plugin_repaired");
+      "assert_ok"           usebundle => assert_class("nexus:outreach_plugin_ok");
+      "not_kept"            usebundle => assert_not_class("nexus:outreach_plugin_kept");
+      "not_error"           usebundle => assert_not_class("nexus:outreach_plugin_error");
+}
+
+bundle agent E04_outreachPlugin_noArg_keptAndOkClassesSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "info"              data => parsejson('{
+        "pluginsdir":     "$(knowledge.tmp_dir)",
+        "version":        "1.1.1-1"
+      }');
+
+      "dirpath"     string => "$(knowledge.tmp_dir)/nexus-outreach-plugin-1.1.1-1";
+
+  files:
+      "$(dirpath)/."
+      create => "true";
+
+  methods:
+      "config"              usebundle => nexus:config(@(info));
+      "outreach_plugin"     usebundle => nexus:outreach_plugin;
+
+      "assert_kept"   usebundle => assert_class("nexus:outreach_plugin_kept");
+      "assert_ok"     usebundle => assert_class("nexus:outreach_plugin_ok");
+      "not_error"     usebundle => assert_not_class("nexus:outreach_plugin_error");
+      "not_repaired"  usebundle => assert_not_class("nexus:outreach_plugin_repaired");
+}
+
+bundle agent F1_01_capabilitiesXmlFile_doesNotExist_createdWithMatchingContents
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected_file"       string => "$(knowledge.expected_dir)/nexus/capabilities.xml";
+      "actual_file"         string => "$(knowledge.tmp_dir)/capabilities.xml";
+
+      "info"                  data => parsejson('{
+        "host":               "nexus.localhost",
+        "version":            "2.7.2-03",
+        "nexus_username":     "$(knowledge.env_user)",
+        "repositories": {
+          "rpms": {
+            "name":           "FGHIJK RPM Releases",
+            "type":           "rpms"
+          }
+        },
+        "caps_xml_file":      "$(actual_file)",
+        "caps_xml_template":  "$(inputs:dirs.templatedir)/daemons/nexus/capabilities.xml",
+        "caps_parser_cmd":    "$(inputs:dirs.moduledir)/nexus_capabilities_parser"
+      }');
+
+  methods:
+      "config"            usebundle => nexus:config(@(info));
+      "caps_xml_file"     usebundle => nexus:caps_xml_file;
+
+      "assert"            usebundle => assert_file_diff("$(expected_file)",
+                                                        "$(actual_file)");
+
+      "ok"                usebundle => assert_class("nexus:caps_xml_file_ok");
+      "repaired"          usebundle => assert_class("nexus:caps_xml_file_repaired");
+      "not_kept"          usebundle => assert_not_class("nexus:caps_xml_file_kept");
+      "not_error"         usebundle => assert_not_class("nexus:caps_xml_file_error");
+}

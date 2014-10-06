@@ -1,0 +1,49 @@
+# SHIRO HASHER TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[shiro_hasher])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "shiro_hasher_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=shiro_hasher" };
+
+  methods:
+      "validate"          usebundle => shiro_hasher:validate;
+      "ok"                usebundle => assert_not_class("shiro_hasher:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  classes:
+      "shiro_hasher_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=shiro_hasher" };
+
+  methods:
+      "config"            usebundle => shiro_hasher:config(@(info));
+      "validate"          usebundle => shiro_hasher:validate;
+      "validation_ok"     usebundle => assert_class("shiro_hasher:validation_ok");
+}

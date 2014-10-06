@@ -1,0 +1,49 @@
+# PYTHON LXML TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[python_lxml])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "python_lxml_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=python_lxml" };
+
+  methods:
+      "validate"          usebundle => python_lxml:validate;
+      "ok"                usebundle => assert_not_class("python_lxml:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  classes:
+      "python_lxml_required"
+      expression => "default:any",
+           scope => "namespace",
+            meta => { "requires=python_lxml" };
+
+  methods:
+      "config"            usebundle => python_lxml:config(@(info));
+      "validate"          usebundle => python_lxml:validate;
+      "validation_ok"     usebundle => assert_class("python_lxml:validation_ok");
+}

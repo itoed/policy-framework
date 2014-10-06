@@ -1,0 +1,14 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+
+import os
+import sys
+
+from os import path
+
+tmpdir = os.getenv("TMP_DIR")
+logpath = path.join(tmpdir, "restorecon-success.log")
+argstr = " ".join(sys.argv[1:])
+with open(logpath, "a") as log:
+    print(argstr, file=log)

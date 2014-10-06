@@ -1,0 +1,4 @@
+---
+BUNDLE_MIRROR__HTTPS://RUBYGEMS1.ORG: http://mirror1.localhost
+BUNDLE_MIRROR__HTTPS://RUBYGEMS2.ORG: http://mirror2.localhost
+BUNDLE_MIRROR__HTTPS://RUBYGEMS3.ORG: http://mirror3.localhost

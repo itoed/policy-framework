@@ -1,0 +1,577 @@
+# TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.test_path)",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "env_user"      string => getenv("USER", 64);
+
+      "tmp_dir"       string => getenv("TMP_DIR", 64),
+                  ifvarclass => not(strcmp("", getenv("TMP_DIR", 64)));
+
+      "test_path"     string => getenv("TEST_PATH", 512),
+                  ifvarclass => not(strcmp("", getenv("TEST_PATH", 512)));
+
+      "workdir"       string => getenv("TEST_WORKDIR", 512),
+                  ifvarclass => not(strcmp("", getenv("TEST_WORKDIR", 512)));
+
+      "expected_dir"  string => "$(workdir)/test/expected-files",
+                  ifvarclass => isvariable("workdir");
+
+      "mocks_dir"     string => "$(workdir)/test/mocks",
+                  ifvarclass => isvariable("workdir");
+
+      "empty_file"    string => "$(mocks_dir)/files/empty-file";
+
+      "inputs"        string => "$(workdir)/masterfiles/inputs.cf";
+}
+
+bundle agent find_test_bundles
+{
+  vars:
+      "b"                          slist => bundlesmatching(".*", "test");
+      "id[$(b)]"                  string => canonifyuniquely("$(b)");
+      "test_$(id[$(b)])[name]"    string => "$(b)";
+      "test_$(id[$(b)])[tags]"     slist => { "@($(b)_meta.tags)" };
+      "data_$(id[$(b)])"            data => mergedata("test_$(id[$(b)])");
+      "json[$(b)]"                string => format("%S", "data_$(id[$(b)])");
+
+  reports:
+      "$(json[$(b)])";
+}
+
+bundle agent assert_class(expected)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "canonify_expected[$(id)]"
+                          string => canonify("$(expected)");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Expected class $(expected) to be set",
+                      ifvarclass => "fail_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Expected class is an undefined variable",
+                      ifvarclass => and("fail_$(id)",
+                                      not(isvariable("canonify_expected[$(id)]")));
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+      expression => "$(expected)";
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_string_equals(expected, actual)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "canonify_actual[$(id)]"
+                          string => canonify("$(actual)");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected string '$(expected)' but ",
+                                            "received '$(actual)'"),
+                      ifvarclass => "fail_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Actual string is an undefined variable",
+                      ifvarclass => and("fail_$(id)",
+                                      not(isvariable("canonify_actual[$(id)]")));
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+      expression => strcmp("$(expected)", "$(actual)");
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_slist_equals(expected, actual)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+      "expected_json"     string => format("%S", "expected");
+      "actual_json"       string => format("%S", "actual");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected slist $(expected_json)",
+                                            " but received slist $(actual_json)"),
+                      ifvarclass => "fail_$(id)";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+      expression => strcmp("$(expected_json)", "$(actual_json)");
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_data_equals(expected, actual)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+      "expected_json"     string => storejson("expected");
+      "actual_json"       string => storejson("actual");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected data $(expected_json)",
+                                            " but received data $(actual_json)"),
+                      ifvarclass => "fail_$(id)";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+      expression => strcmp("$(expected_json)", "$(actual_json)");
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_not_class(class_not_expected)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Expected class $(class_not_expected) not to be set",
+                      ifvarclass => "fail_$(id)";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+             not => "$(class_not_expected)";
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_symlink(path)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Expected path $(path) to be a symlink",
+                      ifvarclass => "fail_$(id)";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+      expression => islink("$(path)");
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_not_file(file)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => "Expected file $(file) not to exist",
+                      ifvarclass => "fail_$(id)";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "pass_$(id)"
+             not => fileexists("$(file)");
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_file_contents(expected_contents, file)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "expected[$(id)]"   string => "$(expected_contents)";
+      "expected[$(id)]"   string => "$(expected_trim[$(id)][1])",
+                      ifvarclass => and(regextract("(.*)\n$", "$(expected[$(id)])",
+                                      "expected_trim[$(id)]"));
+
+      "expected_lines[$(id)]"
+                           slist => string_split("$(expected[$(id)])", "$(const.n)",
+                                                  99999999999);
+      "expected_quoted[$(id)]"
+                           slist => maplist("  '$(this)'", "expected_lines[$(id)]");
+
+      "actual[$(id)]"     string => readfile("$(file)", 4095);
+      "actual[$(id)]"     string => "$(actual_trim[$(id)][1])",
+                      ifvarclass => and(regextract("(.*)\n", "$(actual[$(id)])",
+                                      "actual_trim[$(id)]"));
+
+      "actual_lines[$(id)]"
+                           slist => string_split("$(actual[$(id)])", "$(const.n)",
+                                                  99999999999);
+      "actual_quoted[$(id)]"
+                           slist => maplist("  '$(this)'", "actual_lines[$(id)]");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected contents$(const.n)",
+                                      join("$(const.n)", "expected_quoted[$(id)]"),
+                                      "$(const.n)for file $(file) but the file ",
+                                      "does not exist"),
+                      ifvarclass => and("fail_$(id)", "!file_exists_$(id)");
+
+      "report_$(id)[error]"
+                          string => concat("Expected contents$(const.n)",
+                                        join("$(const.n)", "expected_quoted[$(id)]"),
+                                        "$(const.n)for file $(file) but found$(const.n)",
+                                        join("$(const.n)", "actual_quoted[$(id)]")),
+                      ifvarclass => and("fail_$(id)", "file_exists_$(id)",
+                                          "!contents_match_$(id)");
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "file_exists_$(id)"
+      expression => fileexists("$(file)");
+
+      "contents_match_$(id)"
+      expression => strcmp("$(expected[$(id)])", "$(actual[$(id)])"),
+      ifvarclass => "file_exists_$(id)";
+
+      "pass_$(id)"
+             and => { "file_exists_$(id)", "contents_match_$(id)" };
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_file_diff(expected, actual)
+{
+  vars:
+      "id"               int => countclassesmatching("test:increment_assert_[0-9]+");
+      "diff_module"   string => 'from difflib import unified_diff
+import json
+import sys
+with open("$(expected)") as f_e, open("$(actual)") as f_a:
+    diff = list(unified_diff(f_e.readlines(), f_a.readlines()))
+if diff:
+    print "+contents_do_not_match"
+    print "%diff_$(id)=" + json.dumps(diff)
+else:
+    print "+contents_match"';
+
+      "report_$(id)[result]"
+                      string => "pass",
+                  ifvarclass => "pass_$(id)";
+
+      "report_$(id)[result]"
+                      string => "fail",
+                  ifvarclass => "fail_$(id)";
+
+      "report_$(id)[error]"
+                      string => "Expected file $(expected) does not exist",
+                  ifvarclass => "fail_$(id).!expected_file_exists";
+
+      "report_$(id)[error]"
+                      string => "Actual file $(actual) does not exist",
+                  ifvarclass => "fail_$(id).!actual_file_exists";
+
+      "report_$(id)[error]"
+                      string => concat("Expected file $(expected) and actual file ",
+                                       "$(actual) does not exist"),
+                  ifvarclass => "fail_$(id).!expected_file_exists.!actual_file_exists";
+
+      "report_$(id)[error]"
+                      string => "Diff module failed",
+                  ifvarclass => "diff_module_error";
+
+      "report_$(id)[error]"
+                      string => concat("Contents of files '$(expected)' and ",
+                                       "'$(actual)' do not match"),
+                  ifvarclass => "contents_do_not_match";
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+      expression => "pre_evaluated_$(id)";
+
+      "pre_evaluated_$(id)"
+      expression => "default:any";
+
+      "expected_file_exists"
+      expression => fileexists("$(expected)");
+
+      "actual_file_exists"
+      expression => fileexists("$(actual)");
+
+      "contents_match_$(id)"
+      expression => strcmp("$(expected[$(id)])", "$(actual[$(id)])"),
+      ifvarclass => "file_exists_$(id)";
+
+      "pass_$(id)"
+      expression => "contents_match";
+
+      "fail_$(id)"
+              or => { "!expected_file_exists",
+                      "!actual_file_exists",
+                      "diff_module_error",
+                      "contents_do_not_match",
+                    };
+
+  commands:
+    expected_file_exists.actual_file_exists::
+      "/usr/bin/python -c '$(diff_module)'"
+       module => "true",
+      classes => local("diff_module");
+
+  reports:
+      "$(default:python.diff_$(id))"
+      ifvarclass => isvariable("default:python.diff_$(id)");
+}
+
+bundle agent assert_directory(path)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected directory $(path) ",
+                                      "but it does not exist"),
+                      ifvarclass => and("fail_$(id)", "!file_exists_$(id)");
+
+      "report_$(id)[error]"
+                          string => concat("Expected directory $(path) ",
+                                      "but found a regular file"),
+                      ifvarclass => and("fail_$(id)", "file_exists_$(id)");
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "file_exists_$(id)"
+      expression => fileexists("$(path)");
+
+      "isdir_$(id)"
+      expression => isdir("$(path)");
+
+      "pass_$(id)"
+             and => { "file_exists_$(id)", "isdir_$(id)" };
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_file_perms(expected_perms, file)
+{
+  vars:
+      "id"                   int => countclassesmatching("test:increment_assert_[0-9]+");
+
+      "actual_perms[$(id)]"
+                          string => filestat("$(file)", "permoct");
+
+      "report_$(id)[result]"
+                          string => ifelse("pass_$(id)", "pass", "fail"),
+                      ifvarclass => "evaluated_$(id)";
+
+      "report_$(id)[error]"
+                          string => concat("Expected permission mode $(expected_perms) ",
+                                        "for file $(file) but the file does not exist"),
+                      ifvarclass => and("fail_$(id)", "!file_exists_$(id)");
+
+      "report_$(id)[error]"
+                          string => concat("Expected permission mode $(expected_perms) ",
+                                    "for file $(file) but found $(actual_perms[$(id)])"),
+                      ifvarclass => and("fail_$(id)", "file_exists_$(id)",
+                                          "!perms_match_$(id)");
+
+  classes:
+      "increment_assert_$(id)"
+      expression => "evaluated_$(id)",
+           scope => "namespace";
+
+      "evaluated_$(id)"
+              or => { "pass_$(id)", "fail_$(id)" };
+
+      "file_exists_$(id)"
+      expression => fileexists("$(file)");
+
+      "perms_match_$(id)"
+      expression => strcmp("$(expected_perms)", "$(actual_perms[$(id)])");
+
+      "pass_$(id)"
+             and => { "file_exists_$(id)", "perms_match_$(id)" };
+
+      "fail_$(id)"
+             not => "pass_$(id)";
+}
+
+bundle agent assert_verify_password(hash, plain_text)
+{
+  vars:
+      "id"              string => canonifyuniquely("$(password_plain)");
+
+      "script_lines"     slist => {
+        'import bcrypt',
+        'if bcrypt.hashpw("$(plain_text)", "$(hash)") == "$(hash)":',
+        '    print "CORRECT!"',
+        'else:',
+        '    print "WRONG"'
+      };
+
+      "script"          string => join("$(const.n)", "script_lines");
+
+  commands:
+      "/usr/bin/python -c '$(script)'";
+}
+
+bundle agent report_results
+{
+  vars:
+      "bundles"              slist => bundlesmatching("test:assert_.*");
+      "asserts"              slist => classesmatching("test:increment_assert_[0-9]+");
+      "ids[$(asserts)]"     string => lastnode("$(asserts)", "_");
+      "id"                   slist => getvalues("ids");
+
+      "reportvars[$(id)]"   string => "$(bundles).report_$(id)",
+                        ifvarclass => and(isvariable("$(bundles).report_$(id)[result]"));
+
+      "reportdata_$(id)"      data => mergedata("$(reportvars[$(id)])");
+
+      "report_$(id)"          data => parsejson(format('{
+        "%d":   %s
+      }', "$(id)", format("%S", "reportdata_$(id)")));
+
+      "report"                data => parsejson('{}'),
+                        ifvarclass => not(isvariable("report"));
+
+      "report"                data => mergedata("report", "report_$(id)");
+
+#     "fmt"                 string => storejson("report");
+      "fmt"                 string => format("%S", "report");
+
+  reports:
+      "test_report=$(fmt)";
+}
+
+body classes local(x)
+{
+      promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+     repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+     repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+    repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+             scope => "bundle";
+}
+
+body file control
+{
+  namespace => "inputs";
+}
+
+bundle common basedirs
+{
+  vars:
+      "workdir"         string => "$(test:knowledge.workdir)";
+      "inputdir"        string => "$(test:knowledge.workdir)/masterfiles";
+}

@@ -1,0 +1,450 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+from contextlib import closing
+from mysql.connector import connect
+from mysql.connector import errorcode
+from traceback import print_exc, format_exc
+
+import json
+import mysql.connector
+import re
+import sys
+
+class Promise(object):
+    def __init__(self):
+        self._promise_kept = False
+        self._promise_repaired = False
+        self._repair_failed = False
+        self.errors = []
+
+    @property
+    def promise_kept(self):
+        return self._promise_kept
+
+    @promise_kept.setter
+    def promise_kept(self, value):
+        self._promise_kept = value
+
+    @property
+    def repair_failed(self):
+        return self._repair_failed or self.errors
+
+    @repair_failed.setter
+    def repair_failed(self, value):
+        self._repair_failed = value
+        if value:
+            self._promise_kept = False
+
+    @property
+    def promise_repaired(self):
+        return self._promise_repaired
+
+    @promise_repaired.setter
+    def promise_repaired(self, value):
+        self._promise_repaired = value
+
+    @property
+    def promise_ok(self):
+        return not self.repair_failed and (
+            self.promise_kept or self.promise_repaired)
+
+    def err(self, message):
+        self.repair_failed = True
+        self.errors.append(message)
+
+class Privilege(object):
+    _DEFINITIONS = {
+        "Create_priv": "CREATE",
+        "Drop_priv": "DROP",
+        "Grant_priv": "GRANT OPTION",
+        "Lock_tables_priv": "LOCK TABLES",
+        "References_priv": "REFERENCES",
+        "Event_priv": "EVENT",
+        "Alter_priv": "ALTER",
+        "Delete_priv": "DELETE",
+        "Index_priv": "INDEX",
+        "Insert_priv": "INSERT",
+        "Select_priv": "SELECT",
+        "Update_priv": "UPDATE",
+        "Create_tmp_table_priv": "CREATE TEMPORARY TABLES",
+        "Trigger_priv": "TRIGGER",
+        "Create_view_priv": "CREATE VIEW",
+        "Show_view_priv": "SHOW VIEW",
+        "Alter_routine_priv": "ALTER ROUTINE",
+        "Create_routine_priv": "CREATE ROUTINE",
+        "Execute_priv": "EXECUTE"
+    }
+
+    _COLUMN_REGISTRY = {}
+    _LABEL_REGISTRY = {}
+
+    COLUMNS = set(_DEFINITIONS.keys())
+    LABELS = set(_DEFINITIONS.values())
+
+    def __init__(self, column, label):
+        self.column = column
+        self.label = label
+
+    @classmethod
+    def _register(cls, privilege):
+        cls._COLUMN_REGISTRY[privilege.column] = privilege
+        cls._LABEL_REGISTRY[privilege.label] = privilege
+
+    @classmethod
+    def from_column(cls, column):
+        return cls._COLUMN_REGISTRY[column]
+
+    @classmethod
+    def from_label(cls, label):
+        return cls._LABEL_REGISTRY[label]
+
+for column, label in Privilege._DEFINITIONS.iteritems():
+    Privilege._register(Privilege(column, label))
+
+class UserPresentPromise(Promise):
+    pass
+
+class PasswordPromise(Promise):
+    def __init__(self, value):
+        super(PasswordPromise, self).__init__()
+        self._value = value
+
+    def __str__(self):
+        return self._value
+
+class GrantedPrivilegesPromise(Promise):
+    def __init__(self, db, privset):
+        super(GrantedPrivilegesPromise, self).__init__()
+        self.db = db
+        self._promised_privileges = privset
+        self._existing_privileges = set()
+        self._granted_privileges = set()
+
+    @property
+    def existing_privileges(self):
+        return self._existing_privileges
+
+    @existing_privileges.setter
+    def existing_privileges(self, privset):
+        self._existing_privileges = privset
+        self.promise_kept = (
+            self._promised_privileges <= self._existing_privileges and
+            not self.errors)
+
+    @property
+    def missing_privileges(self):
+        return self._promised_privileges - self._existing_privileges
+
+    @property
+    def granted_privileges(self):
+        return self._granted_privileges
+
+    @granted_privileges.setter
+    def granted_privileges(self, privset):
+        if privset:
+            self.promise_repaired = True
+            self._granted_privileges = privset
+
+class UserPromise(Promise):
+    def __init__(self, username, hostname, policy_promise):
+        super(UserPromise, self).__init__()
+        self.username = username
+        self.hostname = hostname
+
+        self.policy_promise = policy_promise
+        self.password_promise = None
+        self.grant_promises = []
+
+    @property
+    def account(self):
+        return self.username + "@" + self.hostname
+
+    @property
+    def promise_kept(self):
+        return (self.policy_promise.promise_kept and
+            (not self.password_promise or self.password_promise.promise_kept) and
+            all([ p.promise_kept for p in self.grant_promises ]))
+
+    @property
+    def promise_repaired(self):
+        return (self.policy_promise.promise_repaired or
+            (not self.password_promise or self.password_promise.promise_repaired) or
+            any([ p.promise_repaired for p in self.grant_promises ]))
+
+    @property
+    def repair_failed(self):
+        return (self.policy_promise.repair_failed or
+            (not self.password_promise or self.password_promise.repair_failed) or
+            any([ p.repair_failed for p in self.grant_promises ]))
+
+    @repair_failed.setter
+    def repair_failed(self, value):
+        Promise.repair_failed.fset(self, value)
+
+    def canonify(self):
+        return self.username + "_" + self.hostname
+
+class DatabasePrivilegeCursor(mysql.connector.cursor.MySQLCursor):
+    def _row_to_python(self, rowdata, desc=None):
+        row = super(
+            DatabasePrivilegeCursor, self)._row_to_python(rowdata, desc)
+        if not row:
+            return None
+        rowdict = dict(zip(self.column_names, row))
+        return set([ Privilege.from_column(c) for c in Privilege.COLUMNS
+                     if rowdict[c] == "Y" ])
+
+class ArgumentParser(object):
+    def __init__(self):
+        self.parse_failed = False
+        self.errors = []
+
+        self.root_password = None
+        self.user_promises = []
+
+    def parse(self, args):
+        if len(args) != 3:
+            self.parse_failed = True
+            self.errors.append(
+                ("Module mysql_users must be invoked with exactly two "
+                 "arguments: The MySQL server root password and "
+                 "a JSON representation of the MySQL user promises"))
+            return
+
+        self.root_password = args[1]
+
+        try:
+             promises_args = json.loads(args[2])
+        except ValueError as e:
+            self.parse_failed = True
+            self.errors.append("Invalid JSON '{0}'".format(args[2]))
+            return
+
+        for acct, acct_args in promises_args.iteritems():
+            upr = self._parse_user_promise(acct, acct_args)
+            if upr:
+                self.user_promises.append(upr)
+
+    def _parse_user_promise(self, account, args):
+        match = re.match("^(\w+)@(\w+)$", account)
+        if not match:
+            self.errors.append(
+                "Account name '{0}' is invalid".format(account))
+            return None
+
+        upr = UserPromise(match.group(1), match.group(2), UserPresentPromise())
+
+        if "password" in args:
+            upr.password_promise = PasswordPromise(args["password"])
+
+        if "privileges" in args:
+            priv_args = args["privileges"]
+            if type(priv_args) != dict:
+                upr.err(("Database privileges for user '{0}' are not a "
+                         "dictionary").format(account))
+            else:
+                for db, priv_labels in priv_args.iteritems():
+                    if type(priv_labels) != list:
+                        upr.err(("Privileges for user '{0}' on database "
+                            "'{1}' are not a list").format(account, db))
+                        continue
+
+                    upr.grant_promises.append(
+                        self._parse_db_privileges(db, set(priv_labels)))
+
+        return upr
+
+    def _parse_db_privileges(self, db, labels):
+        valid_labels = Privilege.LABELS & labels
+        invalid_labels = labels - Privilege.LABELS
+
+        gpr = GrantedPrivilegesPromise(db,
+            set([ Privilege.from_label(l) for l in valid_labels ]))
+
+        if invalid_labels:
+            gpr.err("Invalid privileges: " + ", ".join(
+                [ "'{0}'".format(l) for l in invalid_labels ]))
+
+        return gpr
+
+def repair_user_promise(cnx, upr):
+    with closing(cnx.cursor()) as cursor:
+        cursor.execute(
+            ("SELECT PASSWORD(%s), Password FROM mysql.user "
+             "WHERE User = %s AND Host = %s"),
+            (str(upr.password_promise), upr.username, upr.hostname))
+        row = cursor.fetchone()
+        if row:
+            # User is present
+            upr.policy_promise.promise_kept = True
+
+            expected_hash, actual_hash = row
+            if expected_hash == actual_hash:
+                # Password matches
+                upr.password_promise.promise_kept = True
+            else:
+                cursor.execute(
+                    "SET PASSWORD FOR %s@%s = PASSWORD(%s)",
+                    (upr.username, upr.hostname, str(upr.password_promise)))
+                cnx.commit()
+                # Password was repaired
+                upr.password_promise.promise_repaired = True
+
+        elif upr.password_promise:
+            cursor.execute(
+                "CREATE USER %s@%s IDENTIFIED BY %s",
+                (upr.username, upr.hostname, str(upr.password_promise)))
+            cnx.commit()
+            # User was created and password was repaired
+            upr.policy_promise.promise_repaired = True
+            upr.password_promise.promise_repaired = True
+        else:
+            # User could not be created
+            upr.policy_promise.repair_failed = True
+            upr.err("Could not create user '{0}' without password".format(
+                upr.account))
+            return
+
+        with closing(cnx.cursor(cursor_class=
+                DatabasePrivilegeCursor)) as pcursor:
+            for gpr in upr.grant_promises:
+                pcursor.execute(
+                    ("SELECT " + ", ".join(Privilege.COLUMNS) +
+                     " FROM mysql.db "
+                     "WHERE Db = %s AND User = %s AND Host = %s"),
+                    (gpr.db, upr.username, upr.hostname))
+
+                privs = pcursor.fetchone()
+                if privs:
+                    gpr.existing_privileges = privs
+
+                if gpr.missing_privileges:
+                    labels = ", ".join(
+                        [ p.label for p in gpr.missing_privileges ])
+                    cursor.execute(
+                        "GRANT {0} ON {1}.* TO '{2}'@'{3}'".format(
+                            labels, gpr.db, upr.username, upr.hostname))
+                    cnx.commit()
+                    # Privileges were repaired
+                    gpr.granted_privileges = gpr.missing_privileges
+
+user_promises = []
+module_kept_messages = []
+module_repair_messages = []
+module_errors = []
+try:
+    argparser = ArgumentParser()
+    argparser.parse(sys.argv)
+    module_errors.extend(argparser.errors)
+
+    if not argparser.parse_failed:
+        user_promises = argparser.user_promises
+        with closing(connect(
+                user="root",
+                password=argparser.root_password,
+                database="mysql")) as cnx:
+            for upr in user_promises:
+                repair_user_promise(cnx, upr)
+except mysql.connector.Error as e:
+    if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+        module_errors.append("Database username or password incorrect")
+    else:
+        module_errors.append(format_exc())
+except Exception as e:
+    module_errors.append(format_exc())
+
+user_kept_messages = {}
+user_repair_messages = {}
+user_errors = {}
+for upr in user_promises:
+    u = upr.canonify()
+    acct = upr.account
+    kept_messages = []
+    repair_messages = []
+    errors = []
+    errormsg = None
+
+    if upr.promise_kept:
+        print("+user_kept_" + u)
+        print("+user_ok_" + u)
+        kept_messages.append("User '{0}' is as promised".format(acct))
+
+    if upr.repair_failed:
+        print("+user_error_" + u)
+        errors.extend(upr.errors)
+        errors.extend(upr.policy_promise.errors)
+        if upr.password_promise:
+            errors.extend(upr.password_promise.errors)
+        for gpr in upr.grant_promises:
+            errors.extend(gpr.errors)
+
+    if upr.promise_repaired:
+        print("+user_repaired_" + u)
+        print("+user_ok_" + u)
+        if upr.policy_promise.promise_repaired:
+            repair_messages.append("+ User '{0}' was created".format(acct))
+        elif upr.password_promise and upr.password_promise.promise_repaired:
+            repair_messages.append("* Password for user '{0}' was reset".format(acct))
+        for gpr in upr.grant_promises:
+            if gpr.promise_repaired:
+                repair_messages.append("* Granted privileges to user '{0}' on "
+                    "database '{1}': {2}".format(acct, gpr.db, ", ".join(
+                        [ "'{0}'".format(p.label) for p
+                          in gpr.granted_privileges ])))
+
+    if errors:
+        errormsg = "ERROR: User '{0}' could not be repaired".format(acct)
+        errormsg += "\n" + "\n".join(
+            [ "          " + l.rstrip() for e in errors
+              for l in e.split("\n") if l.rstrip() ])
+        user_errors[acct] = errormsg
+
+    if kept_messages:
+        user_kept_messages[acct] = kept_messages
+    if repair_messages:
+        user_repair_messages[acct] = repair_messages
+
+if user_kept_messages:
+    print("%user_kept_messages=" + json.dumps(user_kept_messages))
+if user_repair_messages:
+    print("%user_repair_messages=" + json.dumps(user_repair_messages))
+if user_errors:
+    print("%user_errors=" + json.dumps(user_errors))
+
+module_kept = (all(upr.promise_kept for upr in user_promises) and
+    not module_errors)
+module_repaired = (any(upr.promise_repaired for upr in user_promises) and
+    not module_errors)
+module_ok = module_kept or module_repaired
+
+if module_ok:
+    print("+users_ok")
+
+if module_kept:
+    print("+users_kept")
+    module_kept_messages.append("MySQL users are as promised")
+
+if module_repaired:
+    print("+users_repaired")
+    module_repair_messages.append("* MySQL users were repaired")
+
+if module_kept_messages:
+    keptmsg = "\n".join(
+        [ l.rstrip() for n in module_kept_messages
+          for l in n.split("\n") if l.rstrip() ])
+    print("%module_kept_messages=" + json.dumps([ keptmsg ]))
+
+if module_repair_messages:
+    repairmsg = "\n".join(
+        [ l.rstrip() for n in module_repair_messages
+          for l in n.split("\n") if l.rstrip() ])
+    print("%module_repair_messages=" + json.dumps([ repairmsg ]))
+
+if module_errors:
+    print("+users_error")
+    errormsg = "ERROR: MySQL users could not be repaired"
+    errormsg += "\n" + "\n".join(
+        [ (" " * 10) + l.rstrip() for e in module_errors
+          for l in e.split("\n") if l.rstrip() ])
+    print("%module_errors=" + json.dumps([ errormsg ]))

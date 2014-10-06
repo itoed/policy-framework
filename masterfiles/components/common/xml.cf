@@ -1,0 +1,48 @@
+# XML
+#
+
+body file control
+{
+  namespace => "xml";
+}
+
+bundle agent find_xpath(filepath, expr)
+{
+  vars:
+      "id"            string => canonifyuniquely("xml:find_xpath_$(filepath)");
+
+      "script_lines"   slist => {
+        'from lxml import etree',
+        'query_id = "$(id)"',
+        'filepath = "$(filepath)"',
+        'expr = "$(expr)"',
+        'try:',
+        '    tree = etree.parse(filepath)',
+        '    results = tree.xpath(expr)',
+        'except IOError as e:',
+        '    results = []',
+        'print "^context=findxpath"',
+        'if results:',
+        '    print "+result_found_" + query_id',
+        '    print "=result[{0}]={1}".format(query_id, results[0])',
+        'else:',
+        '    print "+result_not_found_" + query_id',
+        '    print "=result[{0}]=".format(query_id)',
+                                };
+
+      "script"        string => join("$(const.n)", "script_lines");
+
+  commands:
+      "/usr/bin/python -c '$(script)'"
+      module => "true";
+
+  reports:
+      "xml:result_found_$(id)"
+      bundle_return_value_index => "found";
+
+      "xml:result_not_found_$(id)"
+      bundle_return_value_index => "not_found";
+
+      "$(default:findxpath.result[$(id)])"
+      bundle_return_value_index => "result";
+}

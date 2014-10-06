@@ -1,0 +1,37 @@
+# REDIS TEST
+#
+
+body file control
+{
+  namespace => "test";
+  inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.daemons[redis])",
+            };
+}
+
+bundle agent A1_01_validate_noVersion_validationOkClassNotSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "validate"          usebundle => redis:validate;
+      "ok"                usebundle => assert_not_class("redis:validation_ok");
+}
+
+bundle agent A1_02_validate_version_validationOkClassSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "info"          data => parsejson('{
+        "version":    "1"
+      }');
+
+  methods:
+      "config"            usebundle => redis:config(@(info));
+      "validate"          usebundle => redis:validate;
+      "validation_ok"     usebundle => assert_class("redis:validation_ok");
+}

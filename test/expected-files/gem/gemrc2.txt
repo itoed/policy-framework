@@ -1,0 +1,8 @@
+---
+:backtrace: false
+:bulk_threshold: 1000
+:sources:
+- https://rubygems.org/
+- http://admin:admin123@nexus.pacman.fghijk.local/content/repositories/rubygems/
+:update_sources: true
+:verbose: true

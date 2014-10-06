@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<capabilitiesConfiguration>
+  <version>2.0.0</version>
+  <capabilities>
+    <capability>
+      <version>1</version>
+      <id>02ad969afaa87</id>
+      <typeId>yum.generate</typeId>
+      <properties>
+        <property>
+          <key>deleteProcessing</key>
+          <value>true</value>
+        </property>
+        <property>
+          <key>deleteProcessingDelay</key>
+          <value>10</value>
+        </property>
+        <property>
+          <key>repository</key>
+          <value>rpms</value>
+        </property>
+      </properties>
+    </capability>
+    <capability>
+      <version>1</version>
+      <id>060b40f505638</id>
+      <typeId>yum</typeId>
+      <properties>
+        <property>
+          <key>maxNumberParallelThreads</key>
+          <value>10</value>
+        </property>
+      </properties>
+    </capability>
+  </capabilities>
+</capabilitiesConfiguration>

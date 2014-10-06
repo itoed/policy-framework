@@ -1,0 +1,128 @@
+# USER
+#
+
+body file control
+{
+  namespace => "user";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle agent edit_user(argsjson)
+{
+  vars:
+      "args" data => parsejson("$(argsjson)"),
+        classes => class:local("args");
+
+      "username" string => "$(args[username])",
+        ifvarclass => isvariable("args[username]"),
+        classes => class:local("username");
+
+      "homedir" string => "/home/$(username)";
+      "homedir" string => "$(args[homedir])",
+        ifvarclass => isvariable("args[homedir]");
+
+      "policy" string => "locked";
+      "policy" string => "$(args[policy])",
+        ifvarclass => isvariable("args[policy]");
+
+      "groups_secondary" slist => {};
+      "groups_secondary" slist => getvalues("args[groups_secondary]"),
+        ifvarclass => isvariable("args[groups_secondary]");
+
+      "id" string => canonify("$(username)"),
+        ifvarclass => not(isvariable("args[id]")),
+        classes => class:local("id");
+      "id" string => canonify("$(args[id])"),
+        ifvarclass => isvariable("args[id]"),
+        classes => class:local("id");
+
+      "groups_fmt"          string => format("%S", "groups_secondary");
+
+  classes:
+    username_ok::
+      "user_nonexistent_error" not => userexists("$(username)");
+    args_ok::
+      "homedir_nonexistent_error" not => isdir("$(homedir)");
+      "group_nonexistent_$(groups_secondary)_error"
+        not => groupexists("$(groups_secondary)");
+      "group_nonexistent_error"
+        expression => "group_nonexistent_$(groups_secondary)_error";
+
+      "args_valid"
+        and => {
+                "username_ok",
+                "id_ok",
+                "!user_nonexistent_error",
+                "!homedir_nonexistent_error",
+                "!group_nonexistent_error",
+               };
+
+      "has_groups_secondary"
+        expression => isgreaterthan(length("groups_secondary"), "0");
+
+    id_ok::
+      "edit_user_$(id)_error"
+        or => {
+                "!args_valid",
+                "policy_error",
+                "groups_secondary_error",
+              },
+        scope => "namespace";
+      "edit_user_$(id)_repaired"
+        or => {
+                "policy_repaired",
+                "groups_secondary_repaired",
+              },
+        ifvarclass => "!edit_user_$(id)_error",
+        scope => "namespace";
+      "edit_user_$(id)_kept"
+        and => {
+                "policy_kept",
+                "groups_secondary_kept|!has_groups_secondary",
+               },
+        ifvarclass => "!edit_user_$(id)_error.!edit_user_$(id)_repaired",
+        scope => "namespace";
+      "edit_user_$(id)_ok"
+        or => {
+                "edit_user_$(id)_kept",
+                "edit_user_$(id)_repaired",
+              },
+        scope => "namespace";
+
+  users:
+    args_valid::
+      "$(username)"
+        policy => "$(policy)",
+        classes => class:local("policy");
+
+      # If no secondary groups are provided, the user will be removed
+      # from all current secondary groups
+    has_groups_secondary.args_valid::
+      "$(username)"
+        policy => "$(policy)",
+        groups_secondary => { @(groups_secondary) },
+        classes => class:local("groups_secondary");
+
+  reports:
+    default:policy_debug_mode::
+      "User '$(username)' is as promised"
+        ifvarclass => "edit_user_$(id)_kept";
+    user_policy_repaired::
+      "User '$(username)' policy was repaired: $(policy)";
+    groups_secondary_repaired::
+      "* Groups for '$(username)' were repaired: $(groups_fmt)";
+    !username_ok::
+      "ERROR: user:edit_user expected field 'username'";
+    !id_ok::
+      "ERROR: user:edit_user failed to parse 'id' from arguments '$(argsjson)'";
+    user_nonexistent_error::
+      "ERROR: user:edit_user expected existing user '$(username)'";
+    homedir_nonexistent_error::
+      "ERROR: user:edit_user expected existing home directory $(homedir)";
+    default:any::
+      "ERROR: user:edit_user expected existing group '$(groups_secondary)'"
+        ifvarclass => "group_nonexistent_$(groups_secondary)_error";
+}

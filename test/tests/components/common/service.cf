@@ -1,0 +1,37 @@
+# SERVICE TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[service])",
+               };
+}
+
+bundle agent A1_01_chkconfigBundle_nonExistentService_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+    not_a_service_reached::
+      "error"     usebundle => assert_class("test:not_a_service_error");
+
+  services:
+      "not-a-service"
+      service_policy => "start",
+      service_method => service:chkconfig,
+             classes => namespace("not_a_service");
+}
+
+body classes namespace(x)
+{
+      promise_kept => { "$(x)_ok", "$(x)_kept", "$(x)_reached" };
+  promise_repaired => { "$(x)_ok", "$(x)_repaired", "$(x)_reached" };
+     repair_failed => { "$(x)_error", "$(x)_repair_failed", "$(x)_reached" };
+     repair_denied => { "$(x)_error", "$(x)_repair_denied", "$(x)_reached" };
+    repair_timeout => { "$(x)_error", "$(x)_repair_timeout", "$(x)_reached" };
+             scope => "namespace";
+}

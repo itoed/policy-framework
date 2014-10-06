@@ -1,0 +1,76 @@
+body common control
+{
+  bundlesequence => { "cfe_internal_update" };
+}
+
+bundle agent cfe_internal_update
+{
+  files:
+      "/var/cfengine/inputs"
+      copy_from         => u_rcp("/var/cfengine/masterfiles", "$(sys.policy_hub)"),
+      depth_search      => u_recurse("inf"),
+      file_select       => u_input_files,
+      action            => u_immediate,
+      classes           => u_if_repaired("update_report");
+
+      "/var/cfengine/modules"
+      copy_from         => u_rcp("/var/cfengine/modules", "$(sys.policy_hub)"),
+      depth_search      => u_recurse("inf"),
+      file_select       => u_module_files,
+      action            => u_immediate,
+      perms             => u_mog("700", "root", "root"),
+      classes           => u_if_repaired("update_report");
+
+  processes:
+#     "$(sys.bindir)/cf-serverd"
+#     restart_class => "restart_cf_serverd";
+
+  commands:
+#     "$(sys.cf_serverd)"
+#     ifvarclass => "restart_cf_serverd";
+}
+
+body copy_from u_rcp(from,server)
+{
+  source      => "$(from)";
+  compare     => "digest";
+  trustkey    => "false";
+  purge       => "true";
+  !am_policy_hub::
+  servers => { "$(server)" };
+}
+
+body depth_search u_recurse(d)
+{
+  depth => "$(d)";
+  exclude_dirs => { "\.svn", "\.git", "\.hg", "\.bzr" };
+}
+
+body file_select u_input_files
+{
+  leaf_name => { ".*.cf",".*.dat",".*.txt", ".*.vim", ".*.xml", ".*.conf" };
+  file_result => "leaf_name";
+}
+
+body file_select u_module_files
+{
+  leaf_name => { ".*" };
+  file_result => "leaf_name";
+}
+
+body action u_immediate
+{
+  ifelapsed => "0";
+}
+
+body classes u_if_repaired(x)
+{
+  promise_repaired => { "$(x)" };
+}
+
+body perms u_mog(mode, user, group)
+{
+  owners => { "$(user)" };
+  groups => { "$(group)" };
+  mode   => "$(mode)";
+}

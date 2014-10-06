@@ -1,0 +1,544 @@
+# GITLAB
+#
+
+body file control
+{
+  namespace => "gitlab";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[command])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+                "$(inputs:components.common[service])",
+                "$(inputs:components.apps[gem])",
+                "$(inputs:components.apps[git])",
+                "$(inputs:components.apps[py_bcrypt])",
+                "$(inputs:components.daemons[mysql])",
+                "$(inputs:components.daemons[redis])",
+                "$(inputs:components.os[hosts])",
+                "$(inputs:components.os[iptables])",
+                "$(inputs:components.os[network])",
+                "$(inputs:components.os[swap])",
+                "$(inputs:components.os[yum])",
+                "$(inputs:components.platforms[ruby])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies"       slist => {
+                                      "network",
+                                      "hosts",
+                                      "iptables",
+                                      "swap",
+                                      "yum",
+                                      "mysql",
+                                      "redis",
+                                      "ruby",
+                                      "gem",
+                                      "git",
+                                      "py_bcrypt",
+                                    },
+                            meta => { "dependencies" };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"           slist => { "config" };
+
+  vars:
+      "owner"                   string => "git";
+      "unicorn_workers"         string => "1";
+      "unicorn_timeout"         string => "600";
+
+      # Version and host are required inputs
+      "version"                 string => "$(info[version])",
+                            ifvarclass => isvariable("info[version]");
+
+      "host"                    string => "$(info[host])",
+                            ifvarclass => isvariable("info[host]");
+
+      # Default locations
+      "homedir"                 string => "/home/git";
+      "shelldir"                string => "$(homedir)/gitlab-shell";
+      "configdir"               string => "$(homedir)/gitlab/config";
+      "assetsdir"               string => "$(homedir)/gitlab/public/assets";
+      "precompile_assets_log_file"
+                                string => concat("$(homedir)/gitlab/log/",
+                                                 "precompile-assets.cf.log");
+      "repodir"                 string => "$(homedir)/repositories";
+      "satellitesdir"           string => "$(homedir)/gitlab-satellites";
+      "sshdir"                  string => "$(homedir)/.ssh";
+      "gitconfig_file"          string => "$(homedir)/.gitconfig";
+      "authorized_keys_file"    string => "$(sshdir)/authorized_keys";
+      "config_yml_file"         string => "$(shelldir)/config.yml";
+      "gitlab_yml_file"         string => "$(configdir)/gitlab.yml";
+      "unicorn_rb_file"         string => "$(configdir)/unicorn.rb";
+      "database_yml_file"       string => "$(configdir)/database.yml";
+
+      # Default templates
+      "templatedir"             string => "$(sys.inputdir)/templates/daemons/gitlab";
+      "gitconfig_template"      string => "$(templatedir)/gitconfig.txt";
+      "config_yml_template"     string => "$(templatedir)/config.yml";
+      "gitlab_yml_template"     string => "$(templatedir)/gitlab.yml";
+      "unicorn_rb_template"     string => "$(templatedir)/unicorn.rb.txt";
+      "database_yml_template"   string => "$(templatedir)/database.yml";
+
+      # Executables
+      "bundler_cmd"             string => "/usr/bin/bundle";
+      "tables_module"           string => "$(sys.workdir)/modules/gitlab_tables";
+      "admin_module"            string => "$(sys.workdir)/modules/gitlab_admin";
+      "users_module"            string => "$(sys.workdir)/modules/gitlab_users";
+
+      # Database properties (password is a required input)
+      "database_username"       string => "git";
+      "database_password"       string => "$(info[database_password])",
+                            ifvarclass => isvariable("info[database_password]");
+
+      # Gitlab admin properties (Will use default rake initialization values)
+      "admin_email"             string => "$(info[admin_email])",
+                            ifvarclass => isvariable("info[admin_email]");
+
+      "admin_password"          string => "$(info[admin_password])",
+                            ifvarclass => isvariable("info[admin_password]");
+
+      "users"                     data => parsejson('{}'),
+                            ifvarclass => not(isvariable("users"));
+      "users"                     data => mergedata("users", "info[users]"),
+                            ifvarclass => isvariable("info[users]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"                slist => { "validation" };
+
+  classes:
+      "version_error"            not => isvariable("gitlab:config.version");
+      "host_error"               not => isvariable("gitlab:config.host");
+      "database_password_error"  not => isvariable("gitlab:config.database_password");
+
+      "validation_ok"
+             and => { "!version_error", "!host_error", "!database_password_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected gitlab field 'version'";
+    host_error::
+      "ERROR: Expected gitlab field 'host'";
+    database_password_error::
+      "ERROR: Expected gitlab field 'database_password'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  classes:
+      "error" expression => "class:batch_gitlab_error", scope => "namespace";
+      "repaired" expression => "class:batch_gitlab_repaired", scope => "namespace";
+      "kept" expression => "class:batch_gitlab_kept", scope => "namespace";
+      "ok" expression => "class:batch_gitlab_ok", scope => "namespace";
+
+  methods:
+      "package"               usebundle => package:yum_addupdate('{
+        "name":               "gitlab",
+        "version":            "$(config.version)"
+      }');
+
+    package:yum_addupdate_gitlab_ok::
+      "homedir"               usebundle => homedir;
+    homedir_ok::
+      "tables"                usebundle => tables;
+    tables_ok::
+      "admin"                 usebundle => admin;
+    admin_ok::
+      "users"                 usebundle => users;
+    users_ok::
+      "sshdir"                usebundle => sshdir;
+    default:any::
+      "config_batch"          usebundle => class:batch("gitlab_pre_service", '[
+        "package:yum_addupdate_gitlab",
+        "gitlab:homedir",
+        "gitlab:tables",
+        "gitlab:admin",
+        "gitlab:users",
+        "gitlab:sshdir",
+      ]');
+    class:batch_gitlab_pre_service_ok::
+      "services"              usebundle => services;
+    services_ok::
+      "precompile_assets"     usebundle => precompile_assets;
+    default:any::
+      "batch"                 usebundle => class:batch("gitlab", '[
+        "class:batch_gitlab_pre_service"
+        "gitlab:services",
+        "gitlab:precompile_assets",
+      ]');
+
+  reports:
+    kept.default:policy_debug_mode::
+      "Gitlab is as promised";
+    repaired::
+      "* Gitlab was repaired";
+    error::
+      "ERROR: Gitlab could not be repaired";
+}
+
+bundle agent homedir
+{
+  classes:
+      "homedir_error" expression => "class:batch_gitlab_homedir_error", scope => "namespace";
+      "homedir_repaired" expression => "class:batch_gitlab_homedir_repaired", scope => "namespace";
+      "homedir_kept" expression => "class:batch_gitlab_homedir_kept", scope => "namespace";
+      "homedir_ok" expression => "class:batch_gitlab_homedir_ok", scope => "namespace";
+
+  methods:
+      "homedir"                 usebundle => file:edit_dir('{
+        "id":                   "gitlab_homedir",
+        "path":                 "$(config.homedir)",
+        "mode":                 "750",
+        "owner":                "$(config.owner)"
+      }');
+
+    file:edit_dir_gitlab_homedir_ok::
+      "gitconfig_file"          usebundle => file:copy_file('{
+        "id":                   "gitlab_gitconfig_file",
+        "path":                 "$(config.gitconfig_file)",
+        "owner":                "$(config.owner)",
+        "mode":                 "644",
+        "source":               "$(config.gitconfig_template)",
+      }');
+
+      "repodir"                 usebundle => file:edit_dir('{
+        "id":                   "gitlab_repodir",
+        "path":                 "$(config.repodir)",
+        "owner":                "$(config.owner)",
+        "mode":                 "750",
+        "create":               "true"
+      }');
+
+      "satellitesdir"           usebundle => file:edit_dir('{
+        "id":                   "gitlab_satellitesdir",
+        "path":                 "$(config.satellitesdir)",
+        "owner":                "$(config.owner)",
+        "mode":                 "750",
+        "create":               "true"
+      }');
+
+      "shelldir"                usebundle => shelldir;
+      "configdir"               usebundle => configdir;
+
+    default:any::
+      "batch"                   usebundle => class:batch("gitlab_homedir", '[
+        "file:edit_dir_gitlab_homedir",
+        "file:copy_file_gitlab_gitconfig_file",
+        "file:edit_dir_gitlab_repodir",
+        "file:edit_dir_gitlab_satellitesdir",
+        "gitlab:shelldir",
+        "gitlab:configdir",
+      ]');
+}
+
+bundle agent shelldir
+{
+  classes:
+      "shelldir_error" expression => "class:batch_gitlab_shelldir_error", scope => "namespace";
+      "shelldir_repaired" expression => "class:batch_gitlab_shelldir_repaired", scope => "namespace";
+      "shelldir_kept" expression => "class:batch_gitlab_shelldir_kept", scope => "namespace";
+      "shelldir_ok" expression => "class:batch_gitlab_shelldir_ok", scope => "namespace";
+
+  methods:
+      "shelldir"                usebundle => file:edit_dir('{
+        "id":                   "gitlab_shelldir",
+        "path":                 "$(config.shelldir)",
+        "owner":                "$(config.owner)"
+      }');
+
+    file:edit_dir_gitlab_shelldir_ok::
+      "config_yml"              usebundle => file:edit_file('{
+        "id":                   "gitlab_config_yml",
+        "path":                 "$(config.config_yml_file)",
+        "owner":                "$(config.owner)",
+        "mode":                 "644",
+        "create":               "true",
+        "template":             "$(config.config_yml_template)",
+        "template_data": {
+          "gitlab_url":         "https://$(config.host)/"
+        }
+      }');
+
+    default:any::
+      "batch"                   usebundle => class:batch("gitlab_shelldir", '[
+        "file:edit_dir_gitlab_shelldir",
+        "file:edit_file_gitlab_config_yml",
+      ]');
+}
+
+bundle agent configdir
+{
+  classes:
+      "configdir_error" expression => "class:batch_gitlab_configdir_error", scope => "namespace";
+      "configdir_repaired" expression => "class:batch_gitlab_configdir_repaired", scope => "namespace";
+      "configdir_kept" expression => "class:batch_gitlab_configdir_kept", scope => "namespace";
+      "configdir_ok" expression => "class:batch_gitlab_configdir_ok", scope => "namespace";
+
+  methods:
+      "configdir"               usebundle => file:edit_dir('{
+        "id":                   "gitlab_configdir",
+        "path":                 "$(config.configdir)",
+        "owner":                "$(config.owner)"
+      }');
+
+    file:edit_dir_gitlab_configdir_ok::
+      "gitlab_yml"              usebundle => file:edit_file('{
+        "id":                   "gitlab_yml",
+        "path":                 "$(config.gitlab_yml_file)",
+        "owner":                "$(config.owner)",
+        "mode":                 "644",
+        "create":               "true",
+        "template":             "$(config.gitlab_yml_template)",
+        "template_data": {
+          "host":               "$(config.host)"
+        }
+      }');
+
+      "unicorn_rb"              usebundle => file:edit_file('{
+        "id":                   "gitlab_unicorn_rb",
+        "path":                 "$(config.unicorn_rb_file)",
+        "owner":                "$(config.owner)",
+        "mode":                 "644",
+        "create":               "true",
+        "template":             "$(config.unicorn_rb_template)",
+        "template_data": {
+          "worker_processes":   "$(config.unicorn_workers)",
+          "timeout":            "$(config.unicorn_timeout)"
+        }
+      }');
+
+      "database_yml"            usebundle => file:edit_file('{
+        "id":                   "gitlab_database_yml",
+        "path":                 "$(config.database_yml_file)",
+        "owner":                "$(config.owner)",
+        "create":               "true",
+        "template":             "$(config.database_yml_template)",
+        "template_data": {
+          "password":           "$(config.database_password)"
+        }
+      }');
+
+    default:any::
+      "batch"                   usebundle => class:batch("gitlab_configdir", '[
+        "file:edit_dir_gitlab_configdir",
+        "file:edit_file_gitlab_yml",
+        "file:edit_file_gitlab_unicorn_rb",
+        "file:edit_file_gitlab_database_yml",
+      ]');
+}
+
+bundle agent tables
+{
+  vars:
+      "db_user"           string => "$(config.database_username)";
+      "db_pass"           string => "$(config.database_password)";
+
+  classes:
+      "tables_error"
+      expression => "tables_module_error",
+           scope => "namespace";
+
+  commands:
+      "$(config.tables_module) '$(db_user)' '$(db_pass)'"
+       module => "true",
+      classes => class:local("tables_module");
+
+  reports:
+    tables_kept.default:policy_debug_mode::
+      "Gitlab database tables are as promised";
+    tables_repaired::
+      "* Gitlab database tables were repaired";
+    tables_error::
+      "ERROR: Gitlab database tables could not be repaired";
+      "       $(default:gitlab_tables.errors)";
+}
+
+bundle agent admin
+{
+  vars:
+      "db_user"             string => "$(config.database_username)";
+      "db_pass"             string => "$(config.database_password)";
+
+      "args"                string => "'$(db_user)' '$(db_pass)'";
+      "args"                string => "$(args) -e '$(config.admin_email)'",
+                        ifvarclass => isvariable("gitlab:config.admin_email");
+      "args"                string => "$(args) -p '$(config.admin_password)'",
+                        ifvarclass => isvariable("gitlab:config.admin_password");
+
+  classes:
+      "admin_error"
+      expression => "admin_module_error",
+           scope => "namespace";
+
+  commands:
+      "$(config.admin_module) $(args)"
+       module => "true",
+      classes => class:local("admin_module");
+
+  reports:
+    admin_kept.default:policy_debug_mode::
+      "Gitlab administrator is as promised";
+    admin_email_repaired::
+      "* Gitlab administrator email was repaired";
+    admin_password_repaired::
+      "* Gitlab administrator password was repaired";
+    admin_password_expires_repaired::
+      "* Gitlab administrator password expiration was repaired";
+    admin_error::
+      "ERROR: Could not repair Gitlab administrator";
+      "       $(default:gitlab_admin.errors)";
+}
+
+bundle agent users
+{
+  vars:
+      "db_user"             string => "$(config.database_username)";
+      "db_pass"             string => "$(config.database_password)";
+
+      "users"                 data => mergedata("gitlab:config.users");
+      "u"                    slist => getindices("users");
+      "users_json"          string => format("%S", "gitlab:config.users");
+
+  classes:
+      "users_error"
+              or => { "users_module_error", "users_module_repaired.!users_ok" },
+           scope => "namespace";
+
+  commands:
+      "$(config.users_module) '$(db_user)' '$(db_pass)' '$(users_json)'"
+       module => "true",
+      classes => class:local("users_module");
+
+  reports:
+    default:policy_debug_mode::
+      "Gitlab user $(u) is as promised"
+      ifvarclass => "users_kept_$(u)";
+    default:any::
+      "+ Gitlab user $(u) was created"
+      ifvarclass => "users_created_$(u)";
+
+      "* Gitlab user $(u) was repaired ($(default:gitlab_users.repaired[$(u)]))"
+      ifvarclass => "users_repaired_$(u)";
+
+      "ERROR: Gitlab User $(u) could not be repaired
+$(default:gitlab_users.error[$(u)])"
+      ifvarclass => "users_error_$(u)";
+
+    users_kept.default:policy_debug_mode::
+      "Gitlab users are as promised";
+
+    users_error::
+      "ERROR: Could not repair Gitlab users";
+
+      "       $(default:gitlab_users.errors)"
+      ifvarclass => isvariable("default:gitlab_users.errors");
+}
+
+bundle agent sshdir
+{
+  classes:
+      "evaluate_batch" expression => "edit_sshdir_reached";
+
+      "sshdir_error" expression => "class:batch_gitlab_sshdir_error", scope => "namespace";
+      "sshdir_repaired" expression => "class:batch_gitlab_sshdir_repaired", scope => "namespace";
+      "sshdir_kept" expression => "class:batch_gitlab_sshdir_kept", scope => "namespace";
+      "sshdir_ok" expression => "class:batch_gitlab_sshdir_ok", scope => "namespace";
+      
+  files:
+    file:edit_file_gitlab_authorized_keys_ok::
+      "$(config.authorized_keys_file)"
+      edit_defaults => default:empty,
+          edit_line => default:insert_lines(@(default:gitlab_users.authorized_keys)),
+            classes => class:namespace("edit_authorized_keys_file");
+
+  methods:
+      "sshdir"                  usebundle => file:edit_dir('{
+        "id":                   "gitlab_sshdir",
+        "path":                 "$(config.sshdir)",
+        "owner":                "$(config.owner)",
+        "mode":                 "700",
+        "create":               "true"
+      }'), classes => class:local("edit_sshdir");
+
+    file:edit_dir_gitlab_sshdir_ok::
+      "authorized_keys_file"    usebundle => file:edit_file('{
+        "id":                   "gitlab_authorized_keys",
+        "path":                 "$(config.authorized_keys_file)",
+        "owner":                "$(config.owner)",
+        "create":               "true"
+      }');
+
+    evaluate_batch::
+      "batch"                   usebundle => class:batch("gitlab_sshdir", '[
+        "file:edit_dir_gitlab_sshdir",
+        "file:edit_file_gitlab_authorized_keys",
+        "gitlab:edit_authorized_keys_file",
+      ]');
+
+  reports:
+    edit_authorized_keys_file_kept.default:policy_debug_mode::
+      "Keys in file $(config.authorized_keys_file) are as promised";
+    edit_authorized_keys_file_repaired::
+      "* Keys in file $(config.authorized_keys_file) were repaired";
+    edit_authorized_keys_file_error::
+      "ERROR: Keys in file $(config.authorized_keys_file) could not be repaired";
+}
+
+bundle agent services
+{
+  services:
+      "gitlab"
+      service_policy => "start",
+      service_method => service:chkconfig,
+             classes => class:namespace("services");
+}
+
+bundle agent precompile_assets
+{
+  vars:
+      "precompile_assets_cmd"     string => concat("$(config.bundler_cmd) exec rake ",
+                                    "assets:precompile RAILS_ENV=production ",
+                                    ">>$(config.precompile_assets_log_file)  2>&1 &");
+
+  classes:
+      "precompile_assets_error"
+        expression => "call_command_error",
+        scope => "namespace";
+      "precompile_assets_repaired"
+        expression => "call_command_repaired",
+        scope => "namespace";
+      "precompile_assets_kept"
+        expression => isdir("$(config.assetsdir)"),
+        scope => "namespace";
+      "precompile_assets_ok"
+        expression => "precompile_assets_kept|precompile_assets_repaired",
+        scope => "namespace";
+
+  commands:
+    !precompile_assets_kept::
+      "$(precompile_assets_cmd)"
+         contain => command:setuid_in_dir_shell("git", "/home/git/gitlab"),
+         classes => class:local("call_command");
+
+  reports:
+    precompile_assets_kept.default:policy_debug_mode::
+      "Assets directory is as promised";
+    precompile_assets_repaired::
+      "* Assets were precompiled";
+    precompile_assets_error::
+      "ERROR: Could not precompile assets";
+}

@@ -1,0 +1,139 @@
+# OS - Network
+#
+# Ensures that calls to OS commands hostname and nisdomainname
+# return the values provided in the policy configuration:
+#
+
+body file control
+{
+  namespace => "network";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+# Example config:
+# {
+#   "ip":         "192.168.1.101",    // Required
+#   "hostname":   "machine",          // Required
+#   "domain":     "example.com"       // Required
+# }
+#
+bundle agent config(info)
+{
+  meta:
+      "tags"      slist => { "config" };
+
+  vars:
+      "ip"              string => "$(info[ip])",
+                    ifvarclass => isvariable("info[ip]");
+
+      "hostname"        string => "$(info[hostname])",
+                    ifvarclass => isvariable("info[hostname]");
+
+      "domain"          string => "$(info[domain])",
+                    ifvarclass => isvariable("info[domain]");
+
+      "fqhost"          string => "$(hostname).$(domain)",
+                    ifvarclass => and(isvariable("hostname"), isvariable("domain"));
+
+      "sysconfig_file"  string => "/etc/sysconfig/network";
+
+      "hostname_cmd"    string => "/bin/hostname";
+      "domainname_cmd"  string => "/bin/domainname";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"          slist => { "validation" };
+
+  classes:
+      "ip_error"
+             not => isvariable("network:config.ip");
+
+      "hostname_error"
+             not => isvariable("network:config.hostname");
+
+      "domain_error"
+             not => isvariable("network:config.domain");
+
+      "validation_ok"
+         and => { "!ip_error",
+                  "!hostname_error",
+                  "!domain_error",
+                },
+       scope => "namespace";
+
+  reports:
+    ip_error::
+      "ERROR: IP address is missing";
+    hostname_error::
+      "ERROR: Hostname is missing";
+    domain_error::
+      "ERROR: Domain is missing";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"         slist => { "control" };
+
+  classes:
+      "error"
+              or => { "$(sysconfig_file[error])",
+                      "hostname_cmd_error",
+                      "domainname_cmd_error",
+                    },
+           scope => "namespace";
+
+    !error::
+      "ok"
+             and => { "$(sysconfig_file[ok])",
+                      "$(sysconfig_file[kept])|hostname_cmd_ok",
+                      "$(sysconfig_file[kept])|domainname_cmd_ok",
+                    },
+           scope => "namespace";
+
+    ok::
+      "kept"
+      expression => "$(sysconfig_file[kept])",
+           scope => "namespace";
+
+      "repaired"
+              or => { "$(sysconfig_file[repaired])",
+                      "hostname_cmd_repaired",
+                      "domainname_cmd_repaired",
+                    },
+           scope => "namespace";
+
+  methods:
+      "sysconfig_file"    usebundle => file:edit_file('{
+        "path":           "$(config.sysconfig_file)",
+        "mode":           "644",
+        "variable_values": {
+          "HOSTNAME":     "$(config.fqhost)",
+          "NISDOMAIN":    "$(config.domain)"
+        }
+      }'),                useresult => "sysconfig_file";
+
+  commands:
+      "$(config.hostname_cmd) $(config.fqhost)"
+         classes => class:local("hostname_cmd"),
+      ifvarclass => "$(sysconfig_file[repaired])";
+
+      "$(config.domainname_cmd) $(config.domain)"
+         classes => class:local("domainname_cmd"),
+      ifvarclass => "$(sysconfig_file[repaired])";
+
+  reports:
+    hostname_cmd_repaired::
+      "* Host name was set to $(config.fqhost)";
+    hostname_cmd_error::
+      "ERROR: Host name could not be repaired";
+    domainname_cmd_repaired::
+      "* Domain name was set to $(config.domain)";
+    domainname_cmd_error::
+      "ERROR: Domain name could not be repaired";
+}

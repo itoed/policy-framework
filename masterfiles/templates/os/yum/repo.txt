@@ -1,0 +1,16 @@
+[{{repo_id}}]
+metadata_expire=30s
+enabled=1
+protect=0
+gpgcheck=0
+autorefresh=1
+type=rpm-md
+name={{name}}
+baseurl={{baseurl}}
+{{#credentials}}
+username={{username}}
+password={{password}}
+{{/credentials}}
+{{#skip_if_unavailable}}
+skip_if_unavailable=True
+{{/skip_if_unavailable}}

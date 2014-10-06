@@ -1,0 +1,47 @@
+# COMMANDS
+#
+
+body file control
+{
+  namespace => "command";
+}
+
+body contain setuid_in_dir_shell(owner, dir)
+{
+  exec_owner => "$(owner)";
+    useshell => "true";
+       chdir => "$(dir)";
+}
+
+body contain in_shell
+{
+  useshell => "true";
+}
+
+body contain setuid_in_shell(owner)
+{
+  exec_owner => "$(owner)";
+    useshell => "true";
+}
+
+body contain setuid_in_dir(owner, dir)
+{
+  exec_owner => "$(owner)";
+       chdir => "$(dir)";
+}
+
+body contain umask(umask)
+{
+  umask => "$(umask)";
+}
+
+body contain silent
+{
+  no_output => "true";
+}
+
+body contain in_dir_silent(dir)
+{
+      chdir => "$(dir)";
+  no_output => "true";
+}

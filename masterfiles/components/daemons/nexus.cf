@@ -1,0 +1,743 @@
+# NEXUS
+#
+# NOTE: As of Nexus 2.8.1, the nexus capabilities plugin stores configuration
+# in an h2 database as opposed to XML.  It will be necessary to use the REST API
+# to enable or disable capabilities now.  However, deleting the outreach plugin,
+# for instance, then restarting the server automatically removes the capability
+#
+# Criteria for when to restart the service still need to be determined
+#
+# TODO:Repository targets includes the rubygems repository by default.  It should be
+# made optional.
+#
+
+body file control
+{
+  namespace => "nexus";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+                "$(inputs:components.common[package])",
+                "$(inputs:components.common[service])",
+                "$(inputs:components.os[hosts])",
+                "$(inputs:components.os[iptables])",
+                "$(inputs:components.os[network])",
+                "$(inputs:components.os[swap])",
+                "$(inputs:components.os[yum])",
+                "$(inputs:components.platforms[jdk])",
+                #
+                # Inputs with optional usage
+                #
+                "$(inputs:components.apps[createrepo])",
+                "$(inputs:components.apps[python_lxml])",
+                "$(inputs:components.apps[shiro_hasher])",
+               };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+                                "network",
+                                "hosts",
+                                "iptables",
+                                "swap",
+                                "yum",
+                                "nexus_client",
+                                "jdk",
+                                "createrepo",
+                                "python_lxml",
+                                "shiro_hasher",
+                               }, meta => { "dependencies" };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags" slist => { "config" };
+
+  vars:
+      "version" string => "$(info[version])",
+        ifvarclass => isvariable("info[version]");
+
+      "ruby_plugin_version" string => "$(info[ruby_plugin_version])",
+        ifvarclass => isvariable("info[ruby_plugin_version]");
+
+      "host" string => "$(info[host])",
+        ifvarclass => isvariable("info[host]");
+
+      "context_path" string => "/",
+        ifvarclass => not(isvariable("context_path"));
+      "context_path" string => "$(info[context_path])",
+        ifvarclass => isvariable("info[context_path]");
+
+      "nexus_username" string => "nexus",
+        ifvarclass => not(isvariable("nexus_username"));
+      "nexus_username" string => "$(info[nexus_username])",
+        ifvarclass => isvariable("info[nexus_username]");
+
+      "nexus_homedir" string => "/usr/local/nexus",
+        ifvarclass => not(isvariable("nexus_homedir"));
+      "nexus_homedir" string => "$(info[nexus_homedir])",
+        ifvarclass => isvariable("info[nexus_homedir]");
+
+      "pluginsdir" string => "$(nexus_homedir)/nexus/WEB-INF/plugin-repository",
+        ifvarclass => not(isvariable("pluginsdir"));
+      "pluginsdir" string => "$(info[pluginsdir])",
+        ifvarclass => isvariable("info[pluginsdir]");
+
+      "sonatype_workdir" string => "/usr/local/sonatype-work",
+        ifvarclass => not(isvariable("sonatype_workdir"));
+      "sonatype_workdir" string => "$(info[sonatype_workdir])",
+        ifvarclass => isvariable("info[sonatype_workdir]");
+
+      "nexus_workdir" string => "$(sonatype_workdir)/nexus",
+        ifvarclass => not(isvariable("nexus_workdir"));
+      "nexus_workdir" string => "$(info[nexus_workdir])",
+        ifvarclass => isvariable("info[nexus_workdir]");
+
+      "nexus_confdir" string => "$(nexus_workdir)/conf",
+        ifvarclass => not(isvariable("nexus_confdir"));
+      "nexus_confdir" string => "$(info[nexus_confdir])",
+        ifvarclass => isvariable("info[nexus_confdir]");
+
+      "nexus_xml_file" string => "$(nexus_confdir)/nexus.xml",
+        ifvarclass => not(isvariable("nexus_xml_file"));
+      "nexus_xml_file" string => "$(info[nexus_xml_file])",
+        ifvarclass => isvariable("info[nexus_xml_file]");
+
+      "caps_xml_file" string => "$(nexus_confdir)/capabilities.xml",
+        ifvarclass => not(isvariable("caps_xml_file"));
+      "caps_xml_file" string => "$(info[caps_xml_file])",
+        ifvarclass => isvariable("info[caps_xml_file]");
+
+      "security_xml_file" string => "$(nexus_confdir)/security.xml",
+        ifvarclass => not(isvariable("security_xml_file"));
+      "security_xml_file" string => "$(info[security_xml_file])",
+        ifvarclass => isvariable("info[security_xml_file]");
+
+      "templatedir" string => "$(inputs:dirs.templatedir)";
+
+      "nexus_xml_template" string => "$(templatedir)/daemons/nexus/nexus.xml",
+        ifvarclass => not(isvariable("nexus_xml_template"));
+      "nexus_xml_template" string => "$(info[nexus_xml_template])",
+        ifvarclass => isvariable("info[nexus_xml_template]");
+
+      "caps_xml_template" string => "$(templatedir)/daemons/nexus/capabilities.xml",
+        ifvarclass => not(isvariable("caps_xml_template"));
+      "caps_xml_template" string => "$(info[caps_xml_template])",
+        ifvarclass => isvariable("info[caps_xml_template]");
+
+      "security_xml_template" string => "$(templatedir)/daemons/nexus/security.xml",
+        ifvarclass => not(isvariable("security_xml_template"));
+      "security_xml_template" string => "$(info[security_xml_template])",
+        ifvarclass => isvariable("info[security_xml_template]");
+
+      "outreach_plugin" data => parsejson('{ "delete": true }'),
+        ifvarclass => not(isvariable("outreach_plugin"));
+      "outreach_plugin" data => mergedata("info[outreach_plugin]"),
+        ifvarclass => isvariable("info[outreach_plugin]");
+
+      "password_hasher_command" string => "fghijk-shiro-hasher",
+        ifvarclass => not(isvariable("password_hasher_command"));
+      "password_hasher_command" string => "$(info[password_hasher_command])",
+        ifvarclass => isvariable("info[password_hasher_command]");
+
+      "users" data => mergedata("info[users]"),
+        ifvarclass => isvariable("info[users]");
+
+      "moduledir" string => "$(inputs:dirs.moduledir)";
+
+      "security_xml_module" string => "$(moduledir)/nexus_security_xml_helper",
+        ifvarclass => not(isvariable("config_parser_cmd"));
+      "security_xml_module" string => "$(info[security_xml_module])",
+        ifvarclass => isvariable("info[security_xml_module]");
+
+      "config_parser_cmd" string => "$(moduledir)/nexus_config_parser",
+        ifvarclass => not(isvariable("config_parser_cmd"));
+      "config_parser_cmd" string => "$(info[config_parser_cmd])",
+        ifvarclass => isvariable("info[config_parser_cmd]");
+
+      "repositories" data => parsejson('{
+        "central": {
+          "name": "Central",
+          "remote_url": "http://repo1.maven.org/maven2/",
+        },
+        "apache-snapshots": {
+          "name": "Apache Snapshots",
+          "remote_url": "http://repository.apache.org/snapshots/",
+          "repository_policy": "SNAPSHOT"
+        },
+        "codehaus-snapshots": {
+          "name": "Codehaus Snapshots",
+          "remote_url": "http://nexus.codehaus.org/snapshots/",
+          "repository_policy": "SNAPSHOT"
+        },
+        "releases": {
+          "name": "Releases"
+        },
+        "snapshots": {
+          "name": "Snapshots",
+          "repository_policy": "SNAPSHOT"
+        },
+        "thirdparty": {
+          "name": "3rd party"
+        }
+      }'),
+        ifvarclass => not(isvariable("repositories"));
+
+      "repositories" data => mergedata("repositories", "info[repositories]"),
+        ifvarclass => isvariable("info[repositories]");
+
+      "repository_targets" data => parsejson('{
+        "site": {
+          "name": "All (site)",
+          "content_class": "site",
+          "patterns": ".*"
+        },
+        "any": {
+          "name": "All (any)",
+          "content_class": "any",
+          "patterns": ".*"
+        },
+        "maven1": {
+          "name": "All (maven1)",
+          "content_class": "maven1",
+          "patterns": ".*"
+        },
+        "maven2": {
+          "name": "All (maven2)",
+          "content_class": "maven2",
+          "patterns": ".*"
+        },
+        "rubygems": {
+          "name": "All (rubygems)",
+          "content_class": "rubygems",
+          "patterns": ".*"
+        }
+      }'),
+        ifvarclass => not(isvariable("repository_targets"));
+      "repository_targets" data => mergedata("info[repository_targets]"),
+        ifvarclass => isvariable("info[repository_targets]");
+
+      "caps_parser_cmd" string => "$(moduledir)/nexus_capabilities_parser",
+        ifvarclass => not(isvariable("caps_parser_cmd"));
+      "caps_parser_cmd" string => "$(info[caps_parser_cmd])",
+        ifvarclass => isvariable("info[caps_parser_cmd]");
+
+      # Temporary indice used in classes section
+      "repo" slist => getindices("repositories");
+
+  classes:
+      "has_users"
+        expression => isvariable("users"),
+        scope => "namespace",
+        meta => { "requires=shiro_hasher", "requires=python_lxml" };
+
+      "has_rpm_type_repos"
+        expression => strcmp("$(repositories[$(repo)][type])", "rpms"),
+        ifvarclass => isvariable("repositories[$(repo)][type]"),
+        scope => "namespace",
+        meta => { "requires=createrepo" };
+}
+
+bundle agent validate
+{
+  meta:
+      "tags" slist => { "validation" };
+
+  vars:
+      "users" data => mergedata("nexus:config.users");
+      "user_id" slist => getindices("nexus:config.users");
+      "security_xml_template" string => "$(config.security_xml_template)";
+      "repositories" data => mergedata("nexus:config.repositories");
+
+  classes:
+      "version_error" not => isvariable("nexus:config.version");
+      "host_error" not => isvariable("nexus:config.host");
+      "repositories_error" not => isvariable("repositories");
+      "users_first_name_$(user_id)_error"
+        not => isvariable("users[$(user_id)][firstName]");
+      "users_last_name_$(user_id)_error"
+        not => isvariable("users[$(user_id)][lastName]");
+      "users_password_$(user_id)_error"
+        not => isvariable("users[$(user_id)][password]");
+      "users_status_$(user_id)_error"
+        not => isvariable("users[$(user_id)][status]");
+      "users_email_$(user_id)_error"
+        not => isvariable("users[$(user_id)][email]");
+      "users_roles_$(user_id)_error"
+        not => isvariable("users[$(user_id)][roles]");
+
+      "users_error"
+        or => {
+                "users_first_name_$(user_id)_error",
+                "users_last_name_$(user_id)_error",
+                "users_password_$(user_id)_error",
+                "users_status_$(user_id)_error",
+                "users_email_$(user_id)_error",
+                "users_roles_$(user_id)_error",
+              };
+
+      "validation_ok"
+        and => {
+                "!version_error",
+                "!host_error",
+                "!repositories_error",
+                "!users_error",
+               }, scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Expected field 'version'";
+    host_error::
+      "ERROR: Expected field 'host'";
+    repositories_error::
+      "ERROR: Expected field 'repositories'";
+    default:any::
+      "ERROR: Expected firstName field for user '$(user_id)'"
+        ifvarclass => "users_first_name_$(user_id)_error";
+      "ERROR: Expected lastName field for user '$(user_id)'"
+        ifvarclass => "users_last_name_$(user_id)_error";
+      "ERROR: Expected password field for user '$(user_id)'"
+        ifvarclass => "users_password_$(user_id)_error";
+      "ERROR: Expected status field for user '$(user_id)'"
+        ifvarclass => "users_status_$(user_id)_error";
+      "ERROR: Expected email field for user '$(user_id)'"
+        ifvarclass => "users_email_$(user_id)_error";
+      "ERROR: Expected roles field for user '$(user_id)'"
+        ifvarclass => "users_roles_$(user_id)_error";
+}
+
+bundle agent control
+{
+  meta:
+      "tags" slist => { "control" };
+
+  classes:
+      "error" expression => "class:batch_nexus_error", scope => "namespace";
+      "kept" expression => "class:batch_nexus_kept", scope => "namespace";
+      "repaired" expression => "class:batch_nexus_repaired", scope => "namespace";
+      "ok" expression => "class:batch_nexus_ok", scope => "namespace";
+
+  methods:
+      # The version must match nexus.xml
+      "package" usebundle => package:yum_addupdate('{
+        "name": "nexus",
+        "version": "$(config.version)",
+        "arch": "noarch"
+      }');
+
+    package:yum_addupdate_nexus_ok::
+      "ruby_plugin" usebundle => ruby_plugin;
+      "nexus_homedir" usebundle => nexus_homedir;
+      "sonatype_workdir" usebundle => sonatype_workdir;
+
+      "config_batch" usebundle => class:batch("nexus_config", '[
+        "package:yum_addupdate_nexus",
+        "nexus:ruby_plugin",
+        "class:batch_nexus_homedir",
+        "class:batch_nexus_sonatype_workdir",
+      ]');
+
+    class:batch_nexus_config_ok::
+      "service" usebundle => service;
+
+    default:any::
+      "batch" usebundle => class:batch("nexus", '[
+        "class:batch_nexus_config",
+        "nexus:service",
+      ]');
+
+  reports: 
+    kept.default:policy_debug_mode::
+      "Nexus is as promised";
+    repaired::
+      "* Nexus was repaired";
+    error::
+      "ERROR: Nexus could not be repaired";
+}
+
+bundle agent ruby_plugin
+{
+  classes:
+      "has_ruby_plugin" expression => isvariable("nexus:config.ruby_plugin_version");
+
+      "ruby_plugin_error"
+        expression => "package:yum_addupdate_nexus_ruby_plugin_error",
+        scope => "namespace";
+      "ruby_plugin_repaired"
+        expression => "package:yum_addupdate_nexus_ruby_plugin_repaired",
+        scope => "namespace";
+      "ruby_plugin_kept"
+        expression => "!has_ruby_plugin|package:yum_addupdate_nexus_ruby_plugin_kept",
+        scope => "namespace";
+      "ruby_plugin_ok"
+        expression => "!has_ruby_plugin|package:yum_addupdate_nexus_ruby_plugin_ok",
+        scope => "namespace";
+
+  methods:
+    has_ruby_plugin::
+      "addupdate" usebundle => package:yum_addupdate('{
+        "name": "nexus-ruby-plugin",
+        "version": "$(config.ruby_plugin_version)",
+        "arch": "noarch"
+      }');
+}
+
+bundle agent nexus_homedir
+{
+  vars:
+      "homedir" string => "$(config.nexus_homedir)";
+      "owner" string => "$(config.nexus_username)";
+
+  methods:
+      "homedir" usebundle => file:edit_dir('{
+        "id": "nexus_homedir",
+        "path": "$(homedir)",
+        "owner": "$(owner)",
+      }');
+
+      "nexus_initd_file" usebundle => file:edit_file('{
+        "id": "nexus_initd_file",
+        "path": "$(homedir)/bin/nexus",
+        "owner": "$(owner)",
+        "mode": "755",
+        "quoted_values": {
+          "RUN_AS_USER": "$(owner)"
+        }
+      }');
+
+      "nexus_properties_file" usebundle => file:edit_file('{
+        "id": "nexus_properties_file",
+        "path": "$(homedir)/conf/nexus.properties",
+        "owner":"$(owner)",
+        "mode":"644",
+        "variable_values": {
+          "nexus-webapp-context-path": "$(config.context_path)"
+        }
+      }');
+
+      "wrapper_conf_file" usebundle => file:copy_file('{
+        "id": "nexus_wrapper_conf_file",
+        "path": "$(homedir)/bin/jsw/conf/wrapper.conf",
+        "source": "$(config.templatedir)/daemons/nexus/wrapper.conf",
+        "owner": "$(owner)",
+        "mode": "644"
+      }');
+
+      "outreach_plugin" usebundle => outreach_plugin;
+
+      "batch" usebundle => class:batch("nexus_homedir", '[
+        "file:edit_dir_nexus_homedir",
+        "file:edit_file_nexus_initd_file",
+        "file:edit_file_nexus_properties_file",
+        "file:copy_file_nexus_wrapper_conf_file",
+        "nexus:outreach_plugin",
+      ]');
+}
+
+bundle agent outreach_plugin
+{
+  vars:
+      "plugin_config" data => mergedata("nexus:config.outreach_plugin");
+      "outreach_dir" string =>
+        "$(config.pluginsdir)/nexus-outreach-plugin-$(config.version)";
+
+  classes:
+      "directory_present" expression => fileexists("$(outreach_dir)");
+      "delete_requested" expression => strcmp("$(plugin_config[delete])", "true");
+
+      "outreach_plugin_error"
+        expression => "delete_dir_error",
+        scope => "namespace";
+      "outreach_plugin_repaired"
+        expression => "delete_dir_repaired",
+        scope => "namespace";
+      "outreach_plugin_kept"
+        expression => "!directory_present|!delete_requested",
+        scope => "namespace";
+      "outreach_plugin_ok"
+        expression => "delete_dir_ok|!delete_requested",
+        scope => "namespace";
+
+  files:
+    delete_requested::
+      "$(outreach_dir)/META-INF"
+        delete => default:tidy,
+        file_select => default:plain,
+        depth_search => default:recurse("inf");
+
+      "$(outreach_dir)"
+        delete => default:tidy,
+        file_select => default:all,
+        depth_search => default:recurse("inf");
+
+      "$(outreach_dir)"
+        delete => default:tidy,
+        classes => class:local("delete_dir");
+
+  reports:
+    delete_requested.outreach_plugin_kept.default:policy_debug_mode::
+      "Plugin $(outreach_dir) is not present";
+    outreach_plugin_repaired::
+      "- Plugin $(outreach_dir) was removed";
+    outreach_plugin_error::
+      "ERROR: Plugin $(outreach_dir) could not be removed";
+}
+
+bundle agent sonatype_workdir
+{
+  methods:
+      # This directory, by default at /usr/local/sonatype-work,
+      # must exist when service start is invoked, or else an
+      # AccessDeniedException will happen
+      #
+      "sonatype_workdir" usebundle => file:edit_dir('{
+        "id": "nexus_sonatype_workdir",
+        "path": "$(config.sonatype_workdir)",
+        "owner": "$(config.nexus_username)",
+      }');
+
+      "nexus_workdir" usebundle => file:edit_dir('{
+        "id": "nexus_workdir",
+        "path": "$(config.nexus_workdir)",
+        "owner": "$(config.nexus_username)",
+        "create": "true"
+      }');
+
+      "confdir" usebundle => file:edit_dir('{
+        "id": "nexus_confdir",
+        "path": "$(config.nexus_confdir)",
+        "owner": "$(config.nexus_username)",
+        "create": "true"
+      }');
+
+      "nexus_xml_file" usebundle => nexus_xml_file;
+      "caps_xml_file" usebundle => caps_xml_file;
+      "security_xml_file" usebundle => security_xml_file;
+
+      "batch" usebundle => class:batch("nexus_sonatype_workdir", '[
+        "file:edit_dir_nexus_sonatype_workdir",
+        "file:edit_dir_nexus_workdir",
+        "file:edit_dir_nexus_confdir",
+        "nexus:nexus_xml_file",
+        "nexus:caps_xml_file",
+        "nexus:security_xml_file",
+      ]');
+}
+
+bundle agent nexus_xml_file
+{
+  vars:
+      "repositories" data => mergedata("nexus:config.repositories");
+      "repository_targets" data => mergedata("nexus:config.repository_targets");
+
+      "config_parser_cmd" string => "$(nexus:config.config_parser_cmd)";
+      "cmd_argsjson" string => format('{
+        "repositories": %S,
+        "repository_targets": %S
+      }', "repositories",
+          "repository_targets");
+
+    config_parser_ok::
+      "template_data" string => format('{
+        "nexusVersion": "$(config.version)",
+        "baseUrl": "http://$(config.host)$(config.context_path)",
+        "repositories": %S,
+        "repositoryTargets": %S
+      }', "default:nexus_config_parser.data[repositories]",
+          "default:nexus_config_parser.data[repository_targets]");
+
+  classes:
+      "has_repositories" expression => isvariable("repositories");
+    has_repositories::
+      "cmd_argsjson_error" not => isvariable("cmd_argsjson");
+    has_repositories.config_parser_ok::
+      "template_data_error" not => isvariable("template_data");
+    has_repositories::
+      "nexus_xml_file_error"
+        or => {
+                "cmd_argsjson_error",
+                "config_parser_module_error",
+                "config_parser_error",
+                "template_data_error",
+                "file:edit_file_nexus_xml_file_error",
+              }, scope => "namespace";
+    !nexus_xml_file_error::
+      "nexus_xml_file_kept"
+        or => { "file:edit_file_nexus_xml_file_kept", "!has_repositories" },
+        scope => "namespace";
+      "nexus_xml_file_repaired"
+        expression => "file:edit_file_nexus_xml_file_repaired",
+        scope => "namespace";
+      "nexus_xml_file_ok"
+        or => { "file:edit_file_nexus_xml_file_ok", "!has_repositories" },
+        scope => "namespace";
+
+  methods:
+    config_parser_ok.!nexus_xml_file_error::
+      "nexus_xml_file" usebundle => file:edit_file('{
+        "id": "nexus_xml_file",
+        "path": "$(config.nexus_xml_file)",
+        "owner": "$(config.nexus_username)",
+        "mode": "644",
+        "create": "true",
+        "template": "$(config.nexus_xml_template)",
+        "template_data": $(template_data)
+      }');
+
+  commands:
+    has_repositories.!nexus_xml_file_error::
+      "$(config_parser_cmd) '$(cmd_argsjson)'"
+        module => "true",
+        classes => class:local("config_parser_module");
+
+  reports:
+    cmd_argsjson_error::
+      "ERROR: Could not declare 'cmd_argsjson' in nexus_xml_file bundle";
+    template_data_error::
+      "ERROR: Could not declare 'template_data' in nexus_xml_file bundle";
+    default:any::
+      "ERROR: $(default:nexus_config_parser.errors)"
+        ifvarclass => isvariable("default:nexus_config_parser.errors");
+}
+
+bundle agent caps_xml_file
+{
+  vars:
+      "caps_parser_cmd" string => "$(config.caps_parser_cmd)";
+      "cmd_argsjson" string => format("%S", "nexus:config.repositories");
+
+    capabilities_parser_ok::
+      "template_data" string => format('{
+          "version": "2.0.0",
+          "capabilities": %S
+      }', "default:nexus_capabilities_parser.data");
+
+  classes:
+      "cmd_argsjson_error" not => isvariable("cmd_argsjson");
+    capabilities_parser_ok::
+      "template_data_error" not => isvariable("template_data");
+    default:any::
+      "caps_xml_file_error"
+        or => {
+          "cmd_argsjson_error",
+          "caps_parser_module_error",
+          "capabilities_parser_error",
+          "template_data_error",
+          "file:edit_file_nexus_caps_xml_error",
+        }, scope => "namespace";
+    !caps_xml_file_error::
+      "caps_xml_file_kept"
+        expression => "file:edit_file_nexus_caps_xml_kept",
+        scope => "namespace";
+      "caps_xml_file_repaired"
+        expression => "file:edit_file_nexus_caps_xml_repaired",
+        scope => "namespace";
+      "caps_xml_file_ok"
+        expression => "file:edit_file_nexus_caps_xml_ok",
+        scope => "namespace";
+
+  methods:
+    capabilities_parser_ok.!caps_xml_file_error::
+      "caps_xml_file" usebundle => file:edit_file('{
+        "id": "nexus_caps_xml",
+        "path": "$(config.caps_xml_file)",
+        "owner": "$(config.nexus_username)",
+        "mode": "644",
+        "create": "true",
+        "template": "$(config.caps_xml_template)",
+        "template_data": $(template_data)
+      }');
+
+  commands:
+    !caps_xml_file_error::
+      "$(caps_parser_cmd) '$(cmd_argsjson)'"
+        module => "true",
+        classes => class:local("caps_parser_module");
+
+  reports:
+    cmd_argsjson_error::
+      "ERROR: Could not declare 'cmd_argsjson' in caps_xml_file bundle";
+    template_data_error::
+      "ERROR: Could not declare 'template_data' in caps_xml_file bundle";
+    default:any::
+      "ERROR: $(default:nexus_capabilities_parser.errors)"
+        ifvarclass => isvariable("default:nexus_capabilities_parser.errors");
+}
+
+#
+# Edit <users/> and <userRoleMappings/> for using template.
+# to be used it requires the shiro hasher component
+#
+bundle agent security_xml_file
+{
+  vars:
+      "users" data => mergedata("nexus:config.users");
+
+      "call_module" string => format("%s -c '%s' -f %s '%S'",
+                                     "$(config.security_xml_module)",
+                                     "$(config.password_hasher_command)",
+                                     "$(config.security_xml_file)",
+                                     "users");
+
+    parse_users_ok::
+      "template_data" string =>
+        format("%S", "default:nexus_security_xml_helper.template_data");
+
+  classes:
+      "has_users" expression => isvariable("users");
+
+      "security_xml_file_error"
+        or => {
+                "parse_users_error",
+                "file:edit_file_nexus_security_xml_error",
+              }, scope => "namespace";
+    !security_xml_error::
+      "security_xml_file_repaired"
+        expression => "file:edit_file_nexus_security_xml_repaired",
+        scope => "namespace";
+      "security_xml_file_kept"
+        or => { "!has_users", "file:edit_file_nexus_security_xml_kept" },
+        scope => "namespace";
+      "security_xml_file_ok"
+        or => { "!has_users", "file:edit_file_nexus_security_xml_ok" },
+        scope => "namespace";
+
+  methods:
+    has_users.parse_users_ok::
+      "edit_file" usebundle => file:edit_file('{
+        "id": "nexus_security_xml",
+        "path": "$(config.security_xml_file)",
+        "owner": "$(config.nexus_username)",
+        "create": "true",
+        "template": "$(config.security_xml_template)",
+        "template_data": $(template_data)
+      }');
+
+  commands:
+    has_users::
+      "$(call_module)"
+        module => "true",
+        classes => class:local("parse_users");
+
+    parse_users_error::
+      "ERROR: Could not parse users for security.xml file";
+}
+
+bundle agent service
+{
+  services:
+    class:batch_nexus_config_repaired::
+      "nexus"
+        service_policy => "restart",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+
+    class:batch_nexus_config_ok::
+      "nexus"
+        service_policy => "start",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+}

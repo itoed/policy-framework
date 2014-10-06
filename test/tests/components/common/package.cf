@@ -1,0 +1,412 @@
+# PACKAGE TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.common[package])",
+               };
+}
+
+bundle agent A1_01_yumAddUpdate_packageListedDefaultArch_keptClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo widget $(sys.arch) 1-1",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "kept" usebundle => assert_class("package:yum_addupdate_widget_kept");
+      "ok" usebundle => assert_class("package:yum_addupdate_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:yum_addupdate_widget_repaired");
+      "not_error" usebundle => assert_not_class("package:yum_addupdate_widget_error");
+}
+
+bundle agent A1_02_yumAddUpdate_packageListedWithArch_keptClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo widget noarch 1-1",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "widget",
+        "version": "1-1",
+        "arch": "noarch"
+      }');
+
+      "kept" usebundle => assert_class("package:yum_addupdate_widget_kept");
+      "ok" usebundle => assert_class("package:yum_addupdate_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:yum_addupdate_widget_repaired");
+      "not_error" usebundle => assert_not_class("package:yum_addupdate_widget_error");
+}
+
+bundle agent A1_03_yumAddUpdate_installationSuccess_repairedClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo",
+        "rpm_package_add_command": "/bin/true",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "repaired" usebundle => assert_class("package:yum_addupdate_widget_repaired");
+      "ok" usebundle => assert_class("package:yum_addupdate_widget_ok");
+      "not_kept" usebundle => assert_not_class("package:yum_addupdate_widget_kept");
+      "not_error" usebundle => assert_not_class("package:yum_addupdate_widget_error");
+}
+
+bundle agent A1_04_yumAddUpdate_upgradeRelease_repairedClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo openssl $(sys.arch) 1.0.1e-16.el6_5.7",
+        "rpm_package_add_command": "/bin/true",
+        "rpm_package_list_update_command": "/bin/echo openssl $(sys.arch) 1.0.1e-16.el6_5.15",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "openssl",
+        "version": "1.0.1e-16.el6_5.15"
+      }');
+
+      "repaired" usebundle => assert_class("package:yum_addupdate_openssl_repaired");
+      "ok" usebundle => assert_class("package:yum_addupdate_openssl_ok");
+      "not_kept" usebundle => assert_not_class("package:yum_addupdate_openssl_kept");
+      "not_error" usebundle => assert_not_class("package:yum_addupdate_openssl_error");
+}
+
+bundle agent A2_01_yumAddUpdate_installationFails_errorClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo",
+        "rpm_package_add_command": "/bin/false",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "error" usebundle => assert_class("package:yum_addupdate_widget_error");
+      "not_kept" usebundle => assert_not_class("package:yum_addupdate_widget_kept");
+      "not_repaired" usebundle => assert_not_class("package:yum_addupdate_widget_repaired");
+      "not_ok" usebundle => assert_not_class("package:yum_addupdate_widget_ok");
+}
+
+bundle agent A2_02_yumAddUpdate_noExactMatch_errorIsSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo widget noarch 1-1.1",
+        "rpm_package_list_update_command": "/bin/echo",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "error" usebundle => assert_class("package:yum_addupdate_widget_error");
+      "not_kept" usebundle => assert_not_class("package:yum_addupdate_widget_kept");
+      "not_ok" usebundle => assert_not_class("package:yum_addupdate_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:yum_addupdate_widget_repaired");
+}
+
+bundle agent A2_03_yumAddUpdate_upgradeNotFound_errorIsSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo openssl x86_64 1.0.1e-15.el6",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_addupdate" usebundle => package:yum_addupdate('{
+        "name": "openssl",
+        "version": "1.0.1e-16.el6_5.7"
+      }');
+
+      "error" usebundle => assert_class("package:yum_addupdate_openssl_error");
+      "not_kept" usebundle => assert_not_class("package:yum_addupdate_openssl_kept");
+      "not_ok" usebundle => assert_not_class("package:yum_addupdate_openssl_ok");
+      "not_repaired" usebundle => assert_not_class("package:yum_addupdate_openssl_repaired");
+}
+
+bundle agent B1_yumDelete_success_repairedClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo widget noarch 1-1",
+        "rpm_package_delete_command": "/bin/true",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_delete" usebundle => package:yum_delete('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "repaired" usebundle => assert_class("package:yum_delete_widget_repaired");
+      "ok" usebundle => assert_class("package:yum_delete_widget_ok");
+      "not_kept" usebundle => assert_not_class("package:yum_delete_widget_kept");
+      "not_error" usebundle => assert_not_class("package:yum_delete_widget_error");
+}
+
+bundle agent B2_yumDelete_fail_errorClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo widget noarch 1-1",
+        "rpm_package_delete_command": "/bin/false",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_delete" usebundle => package:yum_delete('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "error" usebundle => assert_class("package:yum_delete_widget_error");
+      "not_kept" usebundle => assert_not_class("package:yum_delete_widget_kept");
+      "not_repaired" usebundle => assert_not_class("package:yum_delete_widget_repaired");
+      "not_ok" usebundle => assert_not_class("package:yum_delete_widget_ok");
+}
+
+bundle agent B3_yumDelete_notFound_keptClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "rpm_package_list_command": "/bin/echo",
+        "rpm_package_delete_command": "/bin/false",
+        "rpm_package_list_update_ifelapsed": "0"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "yum_delete" usebundle => package:yum_delete('{
+        "name": "widget",
+        "version": "1-1"
+      }');
+
+      "kept" usebundle => assert_class("package:yum_delete_widget_kept");
+      "ok" usebundle => assert_class("package:yum_delete_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:yum_delete_widget_repaired");
+      "not_error" usebundle => assert_not_class("package:yum_delete_widget_error");
+}
+
+bundle agent C1_gemAdd_gemNotInList_repairedClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "gem_list": "/bin/echo",
+        "gem_install": "/bin/true"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "gem_add" usebundle => package:gem_add('{
+        "name": "widget",
+        "version": "1.2.3"
+      }');
+
+      "repaired" usebundle => assert_class("package:gem_add_widget_repaired");
+      "ok" usebundle => assert_class("package:gem_add_widget_ok");
+      "not_kept" usebundle => assert_not_class("package:gem_add_widget_kept");
+      "not_error" usebundle => assert_not_class("package:gem_add_widget_error");
+}
+
+bundle agent C2_gemAdd_gemInList_keptClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "gem_list": "/bin/echo \'widget (1.2.3)\'",
+        "gem_install": "/bin/true"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "gem_add" usebundle => package:gem_add('{
+        "name": "widget",
+        "version": "1.2.3"
+      }');
+
+      "kept" usebundle => assert_class("package:gem_add_widget_kept");
+      "ok" usebundle => assert_class("package:gem_add_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:gem_add_widget_repaired");
+      "not_error" usebundle => assert_not_class("package:gem_add_widget_error");
+}
+
+bundle agent C3_gemAdd_installFails_errorClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "gem_list": "/bin/echo",
+        "gem_install": "/bin/false"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "gem_add" usebundle => package:gem_add('{
+        "name": "widget",
+        "version": "1.2.3"
+      }');
+
+      "error" usebundle => assert_class("package:gem_add_widget_error");
+      "not_ok" usebundle => assert_not_class("package:gem_add_widget_ok");
+      "not_repaired" usebundle => assert_not_class("package:gem_add_widget_repaired");
+      "not_kept" usebundle => assert_not_class("package:gem_add_widget_kept");
+}
+
+bundle agent C4_gemAdd_noNameAndNoId_noClassesSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "gem_list": "/bin/echo",
+        "gem_install": "/bin/true"
+      }');
+
+  classes:
+      "has_package_classes"
+        expression => classmatch("package:.*"),
+             scope => "namespace";
+
+      "second_pass" expression => "first_pass";
+      "first_pass" expression => "default:any";
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "gem_add" usebundle => package:gem_add('{
+        "version": "1.2.3"
+      }');
+
+    second_pass::
+      "no_package_classes" usebundle => assert_not_class("test:has_package_classes");
+}
+
+bundle agent C5_gemAdd_noVersionAndNoName_errorClassSet
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "gem_list": "/bin/echo",
+        "gem_install": "/bin/true"
+      }');
+
+  methods:
+      "config" usebundle => package:config(@(info));
+
+      "gem_add" usebundle => package:gem_add('{
+        "id": "widget-1.2.3"
+      }');
+
+      "error" usebundle => assert_class("package:gem_add_widget_1_2_3_error");
+      "not_ok" usebundle => assert_not_class("package:gem_add_widget_1_2_3_ok");
+      "not_repaired" usebundle => assert_not_class("package:gem_add_widget_1_2_3_repaired");
+      "not_kept" usebundle => assert_not_class("package:gem_add_widget_1_2_3_kept");
+}
+
+#body file control
+#{
+# namespace => "inputs";
+#
+
+#bundle common inject
+#{
+# vars:
+#     "lib"                   data => parsejson('{
+#       "packages":           "$(test:knowledge.mocks_dir)/lib/packages.cf"
+#     }');
+#}

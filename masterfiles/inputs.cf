@@ -1,0 +1,80 @@
+body file control
+{
+  namespace => "inputs";
+}
+
+bundle common dirs
+{
+  vars:
+      "workdir"                   string => "$(basedirs.workdir)",
+                              ifvarclass => isvariable("inputs:basedirs.workdir");
+      "workdir"                   string => "$(sys.workdir)",
+                              ifvarclass => not(isvariable("workdir"));
+
+      "inputdir"                  string => "$(basedirs.inputdir)",
+                              ifvarclass => isvariable("inputs:basedirs.inputdir");
+      "inputdir"                  string => "$(sys.inputdir)",
+                              ifvarclass => not(isvariable("inputdir"));
+
+      "moduledir"                 string => "$(workdir)/modules";
+      "libdir"                    string => "$(inputdir)/lib/3.6";
+      "componentdir"              string => "$(inputdir)/components";
+      "templatedir"               string => "$(inputdir)/templates";
+      "pubkeydir"                 string => "$(inputdir)/public_keys";
+
+      "bindir"                    string => "/usr/bin";
+}
+
+bundle common lib
+{
+  vars:
+      "_path"                      slist => findfiles("$(dirs.libdir)/*");
+      "_ids[$(_path)]"            string => canonifyuniquely("$(_path)");
+      "_paths[$(_ids[$(_path)])]" string => "$(_path)";
+      "_id"                        slist => getvalues("_ids");
+
+      "$(_match[$(_id)][1])"      string => "$(_paths[$(_id)])",
+                              ifvarclass => "lib_found_$(_id).!inject_$(_id)";
+      "$(_match[$(_id)][1])"      string => nth("inputs:inject.lib",
+                                                "$(_match[$(_id)][1])"),
+                              ifvarclass => "inject_$(_id)";
+
+  classes:
+      "lib_found_$(_id)"
+      expression => regextract("([^/]+)\.cf", "$(_paths[$(_id)])", "_match[$(_id)]"),
+           scope => "bundle";
+
+      "inject_$(_id)"
+      expression => isvariable("inputs:inject.lib[$(_match[$(_id)][1])]"),
+           scope => "bundle";
+}
+
+bundle common components
+{
+  vars:
+      "_path"                      slist => findfiles("$(dirs.componentdir)/*/*");
+      "_ids[$(_path)]"            string => canonifyuniquely("$(_path)");
+      "_paths[$(_ids[$(_path)])]" string => "$(_path)";
+      "_id"                        slist => getvalues("_ids");
+
+      "$(_match[$(_id)][1])[$(_match[$(_id)][2])]"
+                                  string => nth(
+                                    "inputs:inject.components[$(_match[$(_id)][1])]",
+                                    "$(_match[$(_id)][2])"),
+                              ifvarclass => "inject_$(_id)";
+
+      "$(_match[$(_id)][1])[$(_match[$(_id)][2])]"
+                                  string => "$(_paths[$(_id)])",
+                              ifvarclass => "component_found_$(_id).!inject_$(_id)";
+
+  classes:
+      "component_found_$(_id)"
+      expression => regextract("([^/]+)/([^/]+)\.cf",
+                               "$(_paths[$(_id)])", "_match[$(_id)]"),
+           scope => "bundle";
+
+      "inject_$(_id)"
+      expression => isvariable(
+                "inputs:inject.components[$(_match[$(_id)][1])][$(_match[$(_id)][2])]"),
+           scope => "bundle";
+}

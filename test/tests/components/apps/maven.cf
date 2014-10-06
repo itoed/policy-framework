@@ -1,0 +1,417 @@
+# MAVEN TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:components.apps[maven])",
+               };
+}
+
+bundle agent A1_01_settingsXmlFile_badArgs_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "has_classes"
+      expression => classmatch("maven:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "m2dir":          "$(not_a_variable)"
+      }');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:has_classes");
+}
+
+bundle agent A1_02_settingsXmlFile_noPath_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  vars:
+      "u"          string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)"
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A1_03_settingsXmlFile_noUser_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "id":             "x",
+        "m2dir":          "/tmp/not-a-dir"
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_x_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_x_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_x_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_x_ok");
+}
+
+bundle agent A1_04_settingsXmlFile_unresolvableId_noClassesSet
+{
+  meta:
+      "tags"        slist => { "test" };
+
+  classes:
+      "has_classes"
+      expression => classmatch("maven:.*"),
+           scope => "namespace";
+
+      "second_pass"
+      expression => "first_pass";
+
+      "first_pass"
+      expression => "default:any";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "id":             [],
+        "user":           "$(knowledge.env_user)",
+        "m2dir":           "/tmp/not-a-dir"
+      }');
+
+    second_pass::
+      "no_classes"   usebundle => assert_not_class("test:has_classes");
+
+}
+
+bundle agent A2_01_settingsXmlFile_mirrors_contentsRepaired
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"    string => "$(knowledge.expected_dir)/maven/settings-mirrors.xml";
+      "actual"      string => "$(knowledge.tmp_dir)/.m2/settings.xml";
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "mirrors": {
+            "local-central": {
+              "mirrorOf":   "central",
+              "name":       "Maven Central",
+              "url":        "http://example.com/central"
+            }
+          }
+        }
+      }');
+
+      "file_diff"         usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class("maven:settings_xml_$(u)_repaired");
+      "ok"            usebundle => assert_class("maven:settings_xml_$(u)_ok");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_error"     usebundle => assert_not_class("maven:settings_xml_$(u)_error");
+}
+
+bundle agent A2_02_settingsXmlFile_mirrors_contentsKept
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  files:
+      "$(knowledge.tmp_dir)/.m2/."
+        create => "true";
+
+      "$(knowledge.tmp_dir)/.m2/settings.xml"
+        copy_from => local_cp("$(knowledge.expected_dir)/maven/settings-mirrors.xml"),
+            perms => m("644");
+
+  methods:
+      "settings_xml"          usebundle => maven:settings_xml('{
+        "user":               "$(u)",
+        "m2dir":              "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "mirrors": {
+            "local-central": {
+              "mirrorOf":   "central",
+              "name":       "Maven Central",
+              "url":        "http://example.com/central"
+            }
+          },
+          "servers": {
+          }
+        }
+      }');
+
+      "kept"          usebundle => assert_class("maven:settings_xml_$(u)_kept");
+      "ok"            usebundle => assert_class("maven:settings_xml_$(u)_ok");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_error"     usebundle => assert_not_class("maven:settings_xml_$(u)_error");
+}
+
+bundle agent A3_01_settingsXmlFile_mirrorWithNoName_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "mirrors": {
+            "local-central": {
+              "mirrorOf":   "central",
+              "url":        "http://example.com/central"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A3_02_settingsXmlFile_mirrorWithNoUrl_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "mirrors": {
+            "local-central": {
+              "mirrorOf":   "central",
+              "name":       "Maven Central"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A3_03_settingsXmlFile_mirrorWithNoMirrorOf_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":          "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "mirrors": {
+            "local-central": {
+              "name":       "Maven Central"
+              "url":        "http://example.com/central"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A4_01_settingsXmlFile_servers_contentsRepaired
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"    string => "$(knowledge.expected_dir)/maven/settings-servers.xml";
+      "actual"      string => "$(knowledge.tmp_dir)/.m2/settings.xml";
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "servers": {
+            "local-releases": {
+              "username":   "admin",
+              "password":   "P@55word"
+            }
+          }
+        }
+      }');
+
+      "file_diff"         usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class("maven:settings_xml_$(u)_repaired");
+      "ok"            usebundle => assert_class("maven:settings_xml_$(u)_ok");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_error"     usebundle => assert_not_class("maven:settings_xml_$(u)_error");
+}
+
+bundle agent A5_01_settingsXmlFile_serverWithNoUsername_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":          "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "servers": {
+            "local-central": {
+              "password":   "P@55word"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A5_02_settingsXmlFile_serverWithNoPassword_errorClassIsSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":          "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "servers": {
+            "local-central": {
+              "username":   "P@55word"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+bundle agent A6_01_settingsXmlFile_profiles_contentsRepaired
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "expected"    string => "$(knowledge.expected_dir)/maven/settings-profiles.xml";
+      "actual"      string => "$(knowledge.tmp_dir)/.m2/settings.xml";
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "profiles": {
+            "test-profile": {
+              "test.greeting":    "hello",
+              "test.farewell":    "goodbye"
+            },
+            "extra-profile": {
+              "odd":              "1",
+              "even":             "2"
+            }
+          }
+        }
+      }');
+
+      "file_diff"         usebundle => assert_file_diff("$(expected)", "$(actual)");
+
+      "repaired"      usebundle => assert_class("maven:settings_xml_$(u)_repaired");
+      "ok"            usebundle => assert_class("maven:settings_xml_$(u)_ok");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_error"     usebundle => assert_not_class("maven:settings_xml_$(u)_error");
+}
+
+bundle agent A7_01_settingsXmlFile_profiles_errorClassSet
+{
+  meta:
+      "tags"        slist => { "test", "tmpdir" };
+
+  vars:
+      "u"           string => "$(knowledge.env_user)";
+
+  methods:
+      "settings_xml"      usebundle => maven:settings_xml('{
+        "user":           "$(u)",
+        "m2dir":           "$(knowledge.tmp_dir)/.m2",
+        "settings": {
+          "profiles": {
+            "test-profile": {
+              "test.greeting":    {
+              },
+              "test.farewell":    "goodbye"
+            }
+          }
+        }
+      }');
+
+      "error"         usebundle => assert_class("maven:settings_xml_$(u)_error");
+      "not_repaired"  usebundle => assert_not_class("maven:settings_xml_$(u)_repaired");
+      "not_kept"      usebundle => assert_not_class("maven:settings_xml_$(u)_kept");
+      "not_ok"        usebundle => assert_not_class("maven:settings_xml_$(u)_ok");
+}
+
+body copy_from local_cp(from)
+{
+  source => "$(from)";
+}
+
+body perms m(mode)
+{
+  mode => "$(mode)";
+}

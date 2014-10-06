@@ -1,0 +1,141 @@
+# OS - Iptables
+#
+# By default, port 22 will be open for SSH
+#
+# Example:
+#
+# ports": {       // Optional ports to configure
+#   "80":   { "name": "nginx", "open": "true" },
+#   "443":  { "name": "nginx_ssl", "open": "true" },
+#   "8080": { "name": "jenkins" }
+#   "8081": { "name": "nexus" },
+# }
+
+body file control
+{
+  namespace => "iptables";
+     inputs => {
+                "$(inputs:lib.commands)",
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"      slist => { "config" };
+
+  vars:
+      "ports"                   data => mergedata("info[ports]"),
+                          ifvarclass => isvariable("info[ports]");
+
+      "iptables_file"         string => "/etc/sysconfig/iptables";
+      "iptables_template"     string => concat("$(inputs:dirs.templatedir)/",
+                                               "os/iptables/iptables.txt");
+      "iptables_parser"       string => "$(inputs:dirs.moduledir)/iptables_parser";
+
+      "iptables_initd"        string => "/etc/init.d/iptables";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"           slist => { "validation" };
+
+  classes:
+      "ports_error"
+             not => isvariable("iptables:config.ports");
+
+      "validation_ok"
+             and => { "!ports_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    ports_error::
+      "ERROR: Expected field 'ports'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"        slist => { "control" };
+
+  methods:
+      "iptables_file"   usebundle => iptables_file;
+      "service"         usebundle => service;
+}
+
+bundle agent iptables_file
+{
+  vars:
+      "parser_module"         string => "$(iptables:config.iptables_parser)";
+      "parser_argsjson"       string => format("%S", "iptables:config.ports");
+
+    iptables_parser_ok::
+      "ports" string => format("%S", "default:iptables_parser.data");
+
+  classes:
+      "parser_argsjson_error" not => isvariable("parser_argsjson");
+
+      "iptables_file_error"
+        or => {
+                "parser_argsjson_error",
+                "parser_invoke_error",
+                "iptables_parser_error",
+                "file_argsjson_error",
+                "file:edit_file_iptables_file_error",
+              },
+        scope => "namespace";
+    !iptables_file_error::
+      "iptables_file_kept"
+        expression => "file:edit_file_iptables_file_kept",
+        scope => "namespace";
+      "iptables_file_repaired"
+        expression => "file:edit_file_iptables_file_repaired",
+        scope => "namespace";
+      "iptables_file_ok"
+        expression => "file:edit_file_iptables_file_ok",
+        scope => "namespace";
+
+  methods:
+    iptables_parser_ok.!iptables_file_error::
+      "edit_file" usebundle => file:edit_file('{
+        "id": "iptables_file",
+        "path": "$(config.iptables_file)",
+        "create": "true",
+        "template": "$(config.iptables_template)",
+        "template_data": {
+          "ports": $(ports)
+        }
+      }');
+
+  commands:
+    !iptables_file_error::
+      "$(parser_module) '$(parser_argsjson)'"
+        module => "true",
+        classes => class:local("parser_invoke");
+
+  reports:
+    parser_argsjson_error::
+      "ERROR: String variable 'parser_argsjson' could not be declared";
+    iptables_parser_error::
+      "ERROR: $(default:iptables_parser.errors)"
+        ifvarclass => isvariable("default:iptables_parser.errors");
+}
+
+bundle agent service
+{
+  commands:
+    iptables_file_repaired::
+      "$(config.iptables_initd) restart"
+      classes => class:local("restart"),
+      contain => default:silent;
+
+  reports:
+    restart_repaired::
+      "* Iptables service was restarted";
+    restart_error::
+      "ERROR: Iptables service could not be restarted";
+}

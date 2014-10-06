@@ -1,0 +1,143 @@
+# OS - Yum
+#
+# Example:
+#
+# {
+#   "centos-base": {
+#     "name":               "CentOS Base Mirror",
+#     "baseurl":            "http://nexus.example.com/content/repositories/centos-base/"
+#     "username":           "admin",
+#     "password":           "admin123",
+#   }
+# }
+#
+
+body file control
+{
+  namespace => "yum";
+     inputs => {
+                "$(inputs:components.common[class])",
+                "$(inputs:components.common[file])",
+               };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags"             slist => { "config" };
+
+  vars:
+      "owner"               string => "root",
+                        ifvarclass => not(isvariable("owner"));
+      "owner"               string => "$(info[owner])",
+                        ifvarclass => isvariable("info[owner]");
+
+      "repodir"             string => "/etc/yum.repos.d",
+                        ifvarclass => not(isvariable("repodir"));
+      "repodir"             string => "$(info[repodir])",
+                        ifvarclass => isvariable("info[repodir]");
+
+      "repo_template"       string => "$(inputs:dirs.templatedir)/os/yum/repo.txt";
+
+      "repos"                 data => mergedata("info[repos]"),
+                        ifvarclass => isvariable("info[repos]");
+
+      "yum_parser_module"   string => "$(inputs:dirs.moduledir)/yum_parser";
+}
+
+bundle agent validate
+{
+  meta:
+      "tags"           slist => { "validation" };
+
+  classes:
+      "repos_error"
+             not => isvariable("yum:config.repos");
+
+      "validation_ok"
+             and => { "!repos_error",
+                    },
+           scope => "namespace";
+
+  reports:
+    repos_error::
+      "ERROR: Expected field 'repos'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags"           slist => { "control" };
+
+  methods:
+      "repo_files"          usebundle => repo_files;
+      "delete_repo_files"   usebundle => delete_repo_files;
+}
+
+bundle agent repo_files
+{
+  vars:
+      "parser_module"             string => "$(config.yum_parser_module)";
+      "parser_argsjson"           string => format("%S", "yum:config.repos");
+
+    yum_parser_ok::
+      "repos"                       data => mergedata("default:yum_parser.data");
+      "index"                      slist => getindices("repos");
+      "repo_argsjson[$(index)]"   string => format("%S", "repos[$(index)]");
+
+  methods:
+    yum_parser_ok::
+      "repo_file_$(index)"      usebundle => repo_file("$(repo_argsjson[$(index)])");
+
+  commands:
+      "$(parser_module) '$(parser_argsjson)'"
+       module => "true",
+      classes => class:local("parser_invoke");
+
+  reports:
+      "ERROR: $(default:yum_parser.errors)"
+      ifvarclass => isvariable("default:yum_parser.errors");
+}
+
+bundle agent repo_file(argsjson)
+{
+  vars:
+      "args"                  data => parsejson("$(argsjson)");
+      "repo_id"             string => "$(args[repo_id])";
+
+      "file_argsjson"       string => format('{
+        "path":             "$(config.repodir)/$(repo_id).repo",
+        "mode":             "644",
+        "owner":            "$(config.owner)",
+        "create":           "true",
+        "template":         "$(config.repo_template)",
+        "template_data":    %S
+      }', "args");
+
+  methods:
+      "edit_file"         usebundle => file:edit_file("$(file_argsjson)"),
+                          useresult => "edit_file";
+}
+
+#
+# NOTE:   This files promise should be abstracted into the file namespace
+#
+bundle agent delete_repo_files
+{
+  vars:
+      "repo_id"     slist => getindices("yum:config.repos");
+      "keep"        slist => maplist("$(this).repo", "repo_id");
+
+  files:
+      "$(config.repodir)"
+            delete => default:tidy,
+      depth_search => default:recurse("0"),
+       file_select => default:ex_list(@(keep)),
+           classes => class:local("remove_unused");
+
+  reports:
+    remove_unused_repaired::
+      "- Removed unused Yum repository files";
+    remove_unused_error::
+      "ERROR: Unused Yum repository files could not be removed";
+}

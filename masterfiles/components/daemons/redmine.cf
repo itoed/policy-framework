@@ -1,0 +1,696 @@
+# REDMINE
+#
+
+body file control
+{
+  namespace => "redmine";
+  inputs => {
+              "$(inputs:components.common[class])",
+              "$(inputs:components.common[command])",
+              "$(inputs:components.common[file])",
+              "$(inputs:components.common[package])",
+              "$(inputs:components.common[service])",
+              "$(inputs:components.common[user])",
+              "$(inputs:components.apps[gem])",
+              "$(inputs:components.daemons[mysql])",
+              "$(inputs:components.libs[openssl])",
+              "$(inputs:components.os[hosts])",
+              "$(inputs:components.os[iptables])",
+              "$(inputs:components.os[network])",
+              "$(inputs:components.os[yum])",
+              "$(inputs:components.platforms[ruby])",
+            };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+        "network",
+        "hosts",
+        "iptables",
+        "yum",
+        "openssl",
+        "mysql",
+        "ruby",
+        "gem",
+      }, meta => { "dependencies" };
+}
+
+bundle agent config(info)
+{
+  meta:
+      "tags" slist => { "config" };
+
+  vars:
+      "owner" string => "redmine";
+      "bundle_cmd" string => "/usr/bin/bundle";
+      "mysql_cmd" string => "/usr/bin/mysql";
+      "python_cmd" string => "/usr/bin/python";
+      "egrep_cmd" string => "/bin/egrep";
+      "homedir" string => "/home/redmine";
+      "appdir" string => "/home/redmine/redmine";
+      "templatedir" string => "$(inputs:dirs.templatedir)/daemons/redmine";
+
+      "mysql_exec_query" string => '$(mysql_cmd) --defaults-file=$(homedir)/.my.cnf -NB -e';
+      "grep_row_separator" string => "$(egrep_cmd) -v '^\*.*\*$'";
+
+      "version" string => "$(info[version])",
+        ifvarclass => isvariable("info[version]");
+      "theme_version" string => "$(info[theme_version])",
+        ifvarclass => isvariable("info[theme_version]");
+      "ui_theme" string => "$(info[ui_theme])",
+        ifvarclass => isvariable("info[ui_theme]");
+      "database_password" string => "$(info[database_password])",
+        ifvarclass => isvariable("info[database_password]");
+      "email_delivery" data => mergedata("info[email_delivery]"),
+        ifvarclass => isvariable("info[email_delivery]");
+      "admin_email" string => "$(info[admin_email])",
+        ifvarclass => isvariable("info[admin_email]");
+      "admin_password" string => "$(info[admin_password])",
+        ifvarclass => isvariable("info[admin_password]");
+      "app_title" string => "$(info[app_title])",
+        ifvarclass => isvariable("info[app_title]");
+      "host_name" string => "$(info[host_name])",
+        ifvarclass => isvariable("info[host_name]");
+      "protocol" string => "$(info[protocol])",
+        ifvarclass => isvariable("info[protocol]");
+      "emails_footer" string => "$(info[emails_footer])",
+        ifvarclass => isvariable("info[emails_footer]");
+      "mail_from" string => "$(info[mail_from])",
+        ifvarclass => isvariable("info[mail_from]");
+      "force_default_language_for_anonymous" string => "$(info[force_default_language_for_anonymous])",
+        ifvarclass => isvariable("info[force_default_language_for_anonymous]");
+      "groups_secondary" data => mergedata("info[groups_secondary]"),
+        ifvarclass => isvariable("info[groups_secondary]");
+}
+
+bundle agent validate
+{
+  meta:
+      "tags" slist => { "validation" };
+
+  classes:
+      "version_error" not => isvariable("redmine:config.version");
+      "database_password_error" not => isvariable("redmine:config.database_password");
+
+      "validation_ok"
+        and => {
+          "!version_error",
+          "!database_password_error",
+        },
+        scope => "namespace";
+
+  reports:
+    version_error::
+      "ERROR: Redmine expected field 'version'";
+    database_password_error::
+      "ERROR: Redmine expected field 'database_password'";
+}
+
+bundle agent control
+{
+  meta:
+      "tags" slist => { "control" };
+
+  vars:
+      "groups_secondary" string => format("%S", "redmine:config.groups_secondary"),
+        ifvarclass => isvariable("redmine:config.groups_secondary"),
+        classes => class:local("groups_secondary");
+
+  classes:
+      "error" expression => "class:batch_redmine_error", scope => "namespace";
+      "repaired" expression => "class:batch_redmine_repaired", scope => "namespace";
+      "kept" expression => "class:batch_redmine_kept", scope => "namespace";
+      "ok" expression => "class:batch_redmine_ok", scope => "namespace";
+
+  methods:
+      "package" usebundle => package:yum_addupdate('{
+        "name": "redmine",
+        "version": "$(config.version)"
+      }');
+
+      "theme_package" usebundle => package:yum_addupdate('{
+        "name": "fghijk-redmine-theme-plugin",
+        "version": "$(config.theme_version)",
+        "arch": "noarch"
+      }');
+
+    groups_secondary_reached::
+      "linux_user" usebundle => user:edit_user('{
+        "username": "redmine",
+        "homedir": "$(config.homedir)",
+        "groups_secondary": $(groups_secondary)
+      }');
+
+    default:any::
+      "homedir" usebundle => homedir;
+      "configdir" usebundle => configdir;
+      "database" usebundle => database;
+      "administrator" usebundle => administrator;
+      "settings" usebundle => settings;
+
+      "config_batch" usebundle => class:batch("redmine_pre_service", '[
+        "package:yum_addupdate_redmine",
+        "package:yum_addupdate_fghijk_redmine_theme_plugin",
+        "user:edit_user_redmine",
+        "redmine:homedir",
+        "redmine:configdir",
+        "redmine:administrator",
+        "redmine:settings",
+      ]');
+#       "redmine:database",
+
+    class:batch_redmine_pre_service_ok::
+      "service" usebundle => service;
+
+    default:any::
+      "batch" usebundle => class:batch("redmine", '[
+        "class:batch_redmine_pre_service",
+        "redmine:service",
+      ]');
+
+  reports:
+    kept.default:policy_debug_mode::
+      "Redmine is as promised";
+    repaired::
+      "* Redmine was repaired";
+    error::
+      "ERROR: Redmine could not be repaired";
+}
+
+bundle agent homedir
+{
+  classes:
+      "homedir_error" expression => "class:batch_redmine_homedir_error", scope => "namespace";
+      "homedir_repaired" expression => "class:batch_redmine_homedir_repaired", scope => "namespace";
+      "homedir_kept" expression => "class:batch_redmine_homedir_kept", scope => "namespace";
+      "homedir_ok" expression => "class:batch_redmine_homedir_ok", scope => "namespace";
+
+  methods:
+      "homedir" usebundle => file:edit_dir('{
+        "id": "redmine_homedir",
+        "path": "$(config.homedir)",
+        "mode": "750",
+        "owner": "$(config.owner)"
+      }');
+
+      "mysql_option_file" usebundle => file:edit_file('{
+        "id": "redmine_mysql_options",
+        "path": "$(config.homedir)/.my.cnf",
+        "owner": "$(config.owner)",
+        "create": true,
+        "contents": [
+          "[client]",
+          "user=redmine",
+          "password=$(config.database_password)",
+          "database=redmine",
+        ]
+      }');
+
+      "batch" usebundle => class:batch("redmine_homedir", '[
+        "file:edit_dir_redmine_homedir",
+        "file:edit_file_redmine_mysql_options",
+      ]');
+}
+
+bundle agent configdir
+{
+  classes:
+      "configdir_error" expression => "class:batch_redmine_configdir_error", scope => "namespace";
+      "configdir_repaired" expression => "class:batch_redmine_configdir_repaired", scope => "namespace";
+      "configdir_kept" expression => "class:batch_redmine_configdir_kept", scope => "namespace";
+      "configdir_ok" expression => "class:batch_redmine_configdir_ok", scope => "namespace";
+
+  methods:
+      "database_yml_file" usebundle => file:edit_file('{
+        "id": "redmine_database_yml",
+        "path": "$(config.appdir)/config/database.yml",
+        "owner": "$(config.owner)",
+        "create": true,
+        "template": "$(config.templatedir)/database.yml",
+        "template_data": {
+          "password": "$(config.database_password)"
+        }
+      }');
+
+      "configuration_yml_file" usebundle => configuration_yml_file;
+
+      "secret_token" usebundle => secret_token;
+
+      "batch" usebundle => class:batch("redmine_configdir", '[
+        "file:edit_file_redmine_database_yml",
+        "redmine:configuration_yml_file",
+        "redmine:secret_token",
+      ]');
+}
+
+bundle agent configuration_yml_file
+{
+  vars:
+      "email_delivery" data => mergedata("redmine:config.email_delivery");
+
+  classes:
+      "has_email_delivery" expression => isvariable("redmine:config.email_delivery");
+
+      "configuration_yml_file_error"
+        expression => "file:edit_file_redmine_configuration_yml_error",
+        scope => "namespace";
+
+      "configuration_yml_file_kept"
+        or => {
+          "!has_email_delivery",
+          "file:edit_file_redmine_configuration_yml_kept"
+        },
+        scope => "namespace";
+
+      "configuration_yml_file_repaired"
+        expression => "file:edit_file_redmine_configuration_yml_repaired",
+        scope => "namespace";
+
+      "configuration_yml_file_ok"
+        or => {
+          "file:edit_file_redmine_configuration_yml_kept",
+          "file:edit_file_redmine_configuration_yml_repaired"
+        },
+        scope => "namespace";
+
+  methods:
+    has_email_delivery::
+      "configuration_yml_file" usebundle => file:edit_file('{
+        "id": "redmine_configuration_yml",
+        "path": "$(config.appdir)/config/configuration.yml",
+        "owner": "$(config.owner)",
+        "create": true,
+        "template": "$(config.templatedir)/configuration.yml",
+        "template_data": {
+          "address": "$(email_delivery[address])",
+          "port": $(email_delivery[port]),
+          "domain": "$(email_delivery[domain])",
+          "user_name": "$(email_delivery[user_name])",
+          "password": "$(email_delivery[password])"
+        }
+      }');
+}
+
+bundle agent secret_token
+{
+  vars:
+      "secret_token_file" string =>
+        "$(config.appdir)/config/initializers/secret_token.rb";
+
+  classes:
+      "has_secret_token" expression => fileexists("$(secret_token_file)");
+
+      "secret_token_error" expression => "run_command_error",
+        scope => "namespace";
+    !secret_token_error::
+      "secret_token_repaired"expression => "has_secret_token.run_command_ok",
+        scope => "namespace";
+      "secret_token_kept" expression => "has_secret_token.!run_command_reached",
+        scope => "namespace";
+      "secret_token_ok" expression => "secret_token_kept|secret_token_repaired",
+        scope => "namespace";
+
+  commands:
+    !has_secret_token::
+      "RAILS_ENV=production $(config.bundle_cmd) exec rake generate_secret_token"
+      contain => command:setuid_in_dir_shell("$(config.owner)", "$(config.appdir)"),
+      classes => class:local("run_command");
+
+  reports:
+    secret_token_kept.default:policy_debug_mode::
+      "Redmine secret token is as promised";
+    secret_token_repaired::
+      "* Redmine secret token was repaired";
+    secret_token_error::
+      "ERROR: Redmine secret token could not be repaired";
+}
+
+bundle agent database
+{
+  vars:
+      "query" string => concat(
+        "SELECT CONCAT('=redmine_table_count=', COUNT(*)) ",
+        "FROM information_schema.TABLES ",
+        "WHERE TABLE_SCHEMA = 'redmine'"
+      );
+
+  classes:
+    count_tables_ok::
+      "tables_already_exist" and => {
+        isgreaterthan("$(default:mysql.redmine_table_count)", "0"),
+        "!create_tables_reached"
+      };
+
+      "create_tables" expression => strcmp("0", "$(default:mysql.redmine_table_count)");
+
+  commands:
+      '$(config.mysql_exec_query) "$(query)"'
+        contain => command:setuid_in_shell("$(config.owner)"),
+        module => "true",
+        classes => class:local("count_tables");
+    create_tables::
+      "RAILS_ENV=production $(config.bundle_cmd) exec rake db:migrate >> log/create_tables.log"
+        contain => command:setuid_in_dir_shell("$(config.owner)", "$(config.appdir)"),
+        classes => class:local("create_tables");
+      "RAILS_ENV=production REDMINE_LANG=en $(config.bundle_cmd) exec rake redmine:load_default_data >> log/load_default_data.log"
+        contain => command:setuid_in_dir_shell("$(config.owner)", "$(config.appdir)"),
+        classes => class:local("create_tables");
+
+  reports:
+    tables_already_exist.default:policy_debug_mode::
+      "Redmine database tables were found";
+    create_tables_ok::
+      "* Redmine database tables were created";
+    create_tables_error::
+      "ERROR: redmine:database failed to execute tables module";
+}
+
+bundle agent administrator
+{
+  vars:
+      "selection_query" string => concat(
+        "SELECT IF(mail = '$(config.admin_email)', ",
+        "'+admin_email_kept', '+admin_email_incorrect'), ",
+        "IF(SHA1(CONCAT(salt, SHA1('$(config.admin_password)'))) = hashed_password, ",
+        "'+admin_password_kept', '+admin_password_incorrect') ",
+        "FROM users WHERE login = 'admin'"
+      );
+
+      "email_update_query" string =>
+        "UPDATE users SET mail = '$(config.admin_email)' WHERE login = 'admin'";
+
+      "salt_script" string => 'import os; print "=redmine_admin_salt=" + os.urandom(16).encode("hex")';
+
+    salt_generation_module_ok::
+      "password_update_query" string => concat(
+        "UPDATE users SET hashed_password = ",
+        "SHA1(CONCAT('$(python.redmine_admin_salt)', SHA1('$(config.admin_password)'))), ",
+        "salt = '$(python.redmine_admin_salt)' ",
+        "WHERE login = 'admin'"
+      ),
+        classes => class:local("password_update_query");
+
+  classes:
+      "second_pass" expression => "first_pass";
+      "first_pass" expression => "default:any";
+
+      "administrator_error"
+        or => {
+          "selection_module_error",
+          "email_update_module_error",
+          "salt_generation_module_error",
+          "password_update_module_error",
+        },
+        scope => "namespace";
+    !administrator_error.second_pass::
+      "administrator_kept"
+        and => {
+          "admin_email_kept",
+          "admin_password_kept",
+        },
+        scope => "namespace";
+      "administrator_repaired"
+        or => {
+          "email_update_module_ok",
+          "password_update_module_ok",
+        },
+        scope => "namespace";
+      "administrator_ok"
+        or => {
+          "administrator_kept",
+          "administrator_repaired",
+        },
+        scope => "namespace";
+
+  commands:
+      '$(config.mysql_exec_query) "$(selection_query)" -E redmine | $(config.grep_row_separator)'
+        module => "true",
+        contain => command:in_shell,
+        classes => class:local("selection_module");
+    admin_email_incorrect::
+      '$(config.mysql_exec_query) "$(email_update_query)"'
+        module => "true",
+        classes => class:local("email_update_module");
+    admin_password_incorrect::
+      "$(config.python_cmd) -c '$(salt_script)'"
+        module => "true",
+        classes => class:local("salt_generation_module");
+    admin_password_incorrect.password_update_query_reached::
+      '$(config.mysql_exec_query) "$(password_update_query)"'
+        module => "true",
+        classes => class:local("password_update_module");
+
+  reports:
+    administrator_kept.default:policy_debug_mode::
+      "Redmine administrator is as promised";
+    email_update_module_ok::
+      "* Redmine administrator email was repaired";
+    password_update_module_ok::
+      "* Redmine administrator password was repaired";
+    selection_module_error::
+      "ERROR: redmine:administrator failed to execute selection query module";
+    email_update_module_error::
+      "ERROR: redmine:administrator failed to execute email update module";
+    salt_generation_module_error::
+      "ERROR: redmine:administrator failed to execute salt generation module";
+    password_update_module_error::
+      "ERROR: redmine:administrator failed to execute password update module";
+}
+
+bundle agent settings
+{
+  vars:
+      "selection_query" string =>
+        "SELECT CASE name
+            WHEN 'app_title' THEN
+              IF(value = '$(config.app_title)', '+app_title_kept', '+app_title_incorrect')
+            WHEN 'host_name'
+              THEN IF(value = '$(config.host_name)', '+host_name_kept', '+host_name_incorrect')
+            WHEN 'protocol'
+              THEN IF(value = '$(config.protocol)', '+protocol_kept', '+protocol_incorrect')
+            WHEN 'emails_footer'
+              THEN IF(value = '$(config.emails_footer)', '+emails_footer_kept', '+emails_footer_incorrect')
+            WHEN 'mail_from'
+              THEN IF(value = '$(config.mail_from)', '+mail_from_kept', '+mail_from_incorrect')
+            WHEN 'force_default_language_for_anonymous'
+              THEN IF(value = '$(config.force_default_language_for_anonymous)', '+force_default_language_for_anonymous_kept', '+force_default_language_for_anonymous_incorrect')
+            WHEN 'ui_theme'
+              THEN IF(value = '$(config.ui_theme)', '+ui_theme_kept', '+ui_theme_incorrect')
+          END
+        FROM settings WHERE name in ('app_title', 'host_name', 'protocol',
+          'emails_footer', 'mail_from', 'force_default_language_for_anonymous',
+          'ui_theme')";
+
+      "app_title_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('app_title', '$(config.app_title)', NOW())";
+      "host_name_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('host_name', '$(config.host_name)', NOW())";
+      "protocol_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('protocol', '$(config.protocol)', NOW())";
+      "emails_footer_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('emails_footer', '$(config.emails_footer)', NOW())";
+      "mail_from_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('mail_from', '$(config.mail_from)', NOW())";
+      "force_default_language_for_anonymous_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('force_default_language_for_anonymous', '$(config.force_default_language_for_anonymous)', NOW())";
+      "ui_theme_insert_query" string =>
+        "INSERT INTO settings (name, value, updated_on)
+         VALUES ('ui_theme', '$(config.ui_theme)', NOW())";
+
+      "app_title_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.app_title)', updated_on = NOW()
+         WHERE name = 'app_title'";
+      "host_name_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.host_name)', updated_on = NOW()
+         WHERE name = 'host_name'";
+      "protocol_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.protocol)', updated_on = NOW()
+         WHERE name = 'protocol'";
+      "emails_footer_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.emails_footer)', updated_on = NOW()
+         WHERE name = 'emails_footer'";
+      "mail_from_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.mail_from)', updated_on = NOW()
+         WHERE name = 'mail_from'";
+      "force_default_language_for_anonymous_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.force_default_language_for_anonymous)', updated_on = NOW()
+         WHERE name = 'force_default_language_for_anonymous'";
+      "ui_theme_update_query" string =>
+        "UPDATE settings
+         SET value = '$(config.ui_theme)', updated_on = NOW()
+         WHERE name = 'ui_theme'";
+
+  classes:
+      "settings_error"
+        or => {
+          "selection_module_error",
+          "app_title_module_error",
+          "host_name_module_error",
+          "protocol_module_error",
+          "emails_footer_module_error",
+          "mail_from_module_error",
+          "force_default_language_for_anonymous_module_error",
+          "ui_theme_module_error",
+        },
+        scope => "namespace";
+    !settings_error::
+      "settings_kept"
+        and => {
+          "app_title_kept",
+          "host_name_kept",
+          "protocol_kept",
+          "emails_footer_kept",
+          "mail_from_kept",
+          "force_default_language_for_anonymous_kept",
+          "ui_theme_kept",
+        },
+        scope => "namespace";
+      "settings_repaired"
+        or => {
+          "app_title_module_ok",
+          "host_name_module_ok",
+          "protocol_module_ok",
+          "emails_footer_module_ok",
+          "mail_from_module_ok",
+          "force_default_language_for_anonymous_module_ok",
+          "ui_theme_module_ok",
+        },
+        scope => "namespace";
+      "settings_ok"
+        or => {
+          "settings_kept",
+          "settings_repaired",
+        },
+        scope => "namespace";
+
+  commands:
+      '$(config.mysql_exec_query) "$(selection_query)"'
+        module => "true",
+        classes => class:local("selection_module");
+    (!app_title_kept).(!app_title_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(app_title_insert_query)"'
+        module => "true",
+        classes => class:local("app_title_module");
+    (!host_name_kept).(!host_name_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(host_name_insert_query)"'
+        module => "true",
+        classes => class:local("host_name_module");
+    (!protocol_kept).(!protocol_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(protocol_insert_query)"'
+        module => "true",
+        classes => class:local("protocol_module");
+    (!emails_footer_kept).(!emails_footer_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(emails_footer_insert_query)"'
+        module => "true",
+        classes => class:local("emails_footer_module");
+    (!mail_from_kept).(!mail_from_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(mail_from_insert_query)"'
+        module => "true",
+        classes => class:local("mail_from_module");
+    (!force_default_language_for_anonymous_kept).(!force_default_language_for_anonymous_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(force_default_language_for_anonymous_insert_query)"'
+        module => "true",
+        classes => class:local("force_default_language_for_anonymous_module");
+    (!ui_theme_kept).(!ui_theme_incorrect).selection_module_ok::
+      '$(config.mysql_exec_query) "$(ui_theme_insert_query)"'
+        module => "true",
+        classes => class:local("ui_theme_module");
+    app_title_incorrect::
+      '$(config.mysql_exec_query) "$(app_title_update_query)"'
+        module => "true",
+        classes => class:local("app_title_module");
+    host_name_incorrect::
+      '$(config.mysql_exec_query) "$(host_name_update_query)"'
+        module => "true",
+        classes => class:local("host_name_module");
+    protocol_incorrect::
+      '$(config.mysql_exec_query) "$(protocol_update_query)"'
+        module => "true",
+        classes => class:local("protocol_module");
+    emails_footer_incorrect::
+      '$(config.mysql_exec_query) "$(emails_footer_update_query)"'
+        module => "true",
+        classes => class:local("emails_footer_module");
+    mail_from_incorrect::
+      '$(config.mysql_exec_query) "$(mail_from_update_query)"'
+        module => "true",
+        classes => class:local("mail_from_module");
+    force_default_language_for_anonymous_incorrect::
+      '$(config.mysql_exec_query) "$(force_default_language_for_anonymous_update_query)"'
+        module => "true",
+        classes => class:local("force_default_language_for_anonymous_module");
+    ui_theme_incorrect::
+      '$(config.mysql_exec_query) "$(ui_theme_update_query)"'
+        module => "true",
+        classes => class:local("ui_theme_module");
+
+  reports:
+    settings_kept.default:policy_debug_mode::
+      "Redmine settings are as promised";
+    app_title_module_ok::
+      "* Redmine app_title setting was repaired";
+    host_name_module_ok::
+      "* Redmine host_name setting was repaired";
+    protocol_module_ok::
+      "* Redmine protocol setting was repaired";
+    emails_footer_module_ok::
+      "* Redmine emails_footer setting was repaired";
+    mail_from_module_ok::
+      "* Redmine mail_from setting was repaired";
+    force_default_language_for_anonymous_module_ok::
+      "* Redmine force_default_language_for_anonymous setting was repaired";
+    ui_theme_module_ok::
+      "* Redmine ui_theme setting was repaired";
+    selection_module_error::
+      "ERROR: redmine:settings failed to execute selection module";
+    app_title_module_error::
+      "ERROR: redmine:settings failed to execute app_title module";
+    host_name_module_error::
+      "ERROR: redmine:settings failed to execute host_name module";
+    protocol_module_error::
+      "ERROR: redmine:settings failed to execute protocol module";
+    emails_footer_module_error::
+      "ERROR: redmine:settings failed to execute emails_footer module";
+    mail_from_module_error::
+      "ERROR: redmine:settings failed to execute mail_from module";
+    force_default_language_for_anonymous_module_error::
+      "ERROR: redmine:settings failed to execute force_default_language_for_anonymous module";
+    ui_theme_module_error::
+      "ERROR: redmine:settings failed to execute ui_theme module";
+}
+
+bundle agent service
+{
+  classes:
+      "restart"
+        or => {
+          "package:yum_addupdate_fghijk_redmine_theme_plugin_repaired",
+        };
+
+  services:
+    restart::
+      "redmine"
+        service_policy => "restart",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+
+    !restart::
+      "redmine"
+        service_policy => "start",
+        service_method => service:chkconfig,
+        classes => class:namespace("service");
+}
