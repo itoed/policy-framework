@@ -1,0 +1,208 @@
+# UPDATE TEST
+#
+
+body file control
+{
+  namespace => "test";
+     inputs => {
+                "$(test:knowledge.inputs)",
+                "$(inputs:dirs.inputdir)/update.cf",
+               };
+}
+
+bundle agent A1_01_gitUpdate_localAheadOfRemote_promiseRepaired
+{
+  meta:
+      "tags" slist => { "test", "tmpdir" };
+
+  vars:
+      "tmp_dir" string => "$(knowledge.tmp_dir)";
+      "id" string => canonify("$(tmp_dir)/local_repo");
+
+  files:
+      "$(tmp_dir)/remote_repo/."
+        create => "true",
+        perms => m("755");
+
+      "$(tmp_dir)/remote_repo/test_file1.txt"
+        create => "true";
+
+    local_repo_script_ok::
+      "$(tmp_dir)/remote_repo/test_file2.txt"
+        create => "true",
+        classes => local("test_file2");
+
+  commands:
+      "/bin/sh -c 'git init && git add . && git commit -m \"First commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("remote_repo_script");
+
+    remote_repo_script_ok::
+      "/bin/sh -c 'git clone remote_repo local_repo'"
+        contain => in_dir("$(tmp_dir)"),
+        classes => local("local_repo_script");
+
+    test_file2_ok::
+      "/bin/sh -c 'git add . && git commit -m \"Second commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("second_commit_script");
+
+  methods:
+    second_commit_script_ok::
+      "test" usebundle => default:git_update("$(tmp_dir)/local_repo");
+
+      "repaired" usebundle => assert_class("default:git_update_$(id)_repaired");
+      "ok" usebundle => assert_class("default:git_update_$(id)_ok");
+      "not_kept" usebundle => assert_not_class("default:git_update_$(id)_kept");
+      "not_error" usebundle => assert_not_class("default:git_update_$(id)_error");
+}
+
+bundle agent A2_01_gitUpdate_localSameAsRemote_promiseKept
+{
+  meta:
+      "tags" slist => { "test", "tmpdir" };
+
+  vars:
+      "tmp_dir" string => "$(knowledge.tmp_dir)";
+      "id" string => canonify("$(tmp_dir)/local_repo");
+
+  files:
+      "$(tmp_dir)/remote_repo/."
+        create => "true",
+        perms => m("755");
+
+      "$(tmp_dir)/remote_repo/test_file1.txt"
+        create => "true";
+
+  commands:
+      "/bin/sh -c 'git init && git add . && git commit -m \"First commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("remote_repo_script");
+
+    remote_repo_script_ok::
+      "/bin/sh -c 'git clone remote_repo local_repo'"
+        contain => in_dir("$(tmp_dir)"),
+        classes => local("local_repo_script");
+
+  methods:
+    local_repo_script_ok::
+      "test" usebundle => default:git_update("$(tmp_dir)/local_repo");
+
+      "kept" usebundle => assert_class("default:git_update_$(id)_kept");
+      "ok" usebundle => assert_class("default:git_update_$(id)_ok");
+      "not_repaired" usebundle => assert_not_class("default:git_update_$(id)_repaired");
+      "not_error" usebundle => assert_not_class("default:git_update_$(id)_error");
+}
+
+bundle agent A3_01_gitUpdate_localAheadOfRemote_promiseError
+{
+  meta:
+      "tags" slist => { "test", "tmpdir" };
+
+  vars:
+      "tmp_dir" string => "$(knowledge.tmp_dir)";
+      "id" string => canonify("$(tmp_dir)/local_repo");
+
+  files:
+      "$(tmp_dir)/remote_repo/."
+        create => "true",
+        perms => m("755");
+
+      "$(tmp_dir)/remote_repo/test_file1.txt"
+        create => "true";
+
+    local_repo_script_ok::
+      "$(tmp_dir)/local_repo/test_file2.txt"
+        create => "true",
+        classes => local("test_file2");
+
+  commands:
+      "/bin/sh -c 'git init && git add . && git commit -m \"First commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("remote_repo_script");
+
+    remote_repo_script_ok::
+      "/bin/sh -c 'git clone remote_repo local_repo'"
+        contain => in_dir("$(tmp_dir)"),
+        classes => local("local_repo_script");
+
+    test_file2_ok::
+      "/bin/sh -c 'git add . && git commit -m \"Second commit\"'"
+        contain => in_dir("$(tmp_dir)/local_repo"),
+        classes => local("second_commit_script");
+
+  methods:
+    second_commit_script_ok::
+      "test" usebundle => default:git_update("$(tmp_dir)/local_repo");
+
+      "error" usebundle => assert_class("default:git_update_$(id)_error");
+      "not_repaired" usebundle => assert_not_class("default:git_update_$(id)_repaired");
+      "not_kept" usebundle => assert_not_class("default:git_update_$(id)_kept");
+      "not_ok" usebundle => assert_not_class("default:git_update_$(id)_ok");
+}
+
+bundle agent A3_02_gitUpdate_localDivergedFromRemote_promiseError
+{
+  meta:
+      "tags" slist => { "test", "tmpdir" };
+
+  vars:
+      "tmp_dir" string => "$(knowledge.tmp_dir)";
+      "id" string => canonify("$(tmp_dir)/local_repo");
+
+  files:
+      "$(tmp_dir)/remote_repo/."
+        create => "true",
+        perms => m("755");
+
+      "$(tmp_dir)/remote_repo/test_file1.txt"
+        create => "true";
+
+    local_repo_script_ok::
+      "$(tmp_dir)/remote_repo/test_file2.txt"
+        create => "true",
+        classes => local("test_file2");
+
+      "$(tmp_dir)/local_repo/test_file3.txt"
+        create => "true",
+        classes => local("test_file3");
+
+  commands:
+      "/bin/sh -c 'git init && git add . && git commit -m \"First commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("remote_repo_script");
+
+    remote_repo_script_ok::
+      "/bin/sh -c 'git clone remote_repo local_repo'"
+        contain => in_dir("$(tmp_dir)"),
+        classes => local("local_repo_script");
+
+    test_file2_ok.test_file3_ok::
+      "/bin/sh -c 'git add . && git commit -m \"Second commit\"'"
+        contain => in_dir("$(tmp_dir)/remote_repo"),
+        classes => local("second_commit_script");
+
+      "/bin/sh -c 'git add . && git commit -m \"Third commit\"'"
+        contain => in_dir("$(tmp_dir)/local_repo"),
+        classes => local("third_commit_script");
+
+  methods:
+    second_commit_script_ok.third_commit_script_ok::
+      "test" usebundle => default:git_update("$(tmp_dir)/local_repo");
+
+      "error" usebundle => assert_class("default:git_update_$(id)_error");
+      "not_repaired" usebundle => assert_not_class("default:git_update_$(id)_repaired");
+      "not_kept" usebundle => assert_not_class("default:git_update_$(id)_kept");
+      "not_ok" usebundle => assert_not_class("default:git_update_$(id)_ok");
+}
+
+body contain in_dir(dir)
+{
+  chdir => "$(dir)";
+  no_output => "true";
+}
+
+body perms m(mode)
+{
+  mode => "$(mode)";
+}

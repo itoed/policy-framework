@@ -10,7 +10,9 @@ bundle agent cfe_internal_update
 {
   methods:
     policy_server::
-      "git_update" usebundle => git_update;
+      "git_update_masterfiles" usebundle => git_update("/var/cfengine/masterfiles");
+      "git_update_modules" usebundle => git_update("/var/cfengine/modules");
+
     any::
       "file_update" usebundle => file_update;
 
@@ -40,48 +42,75 @@ bundle agent file_update
         perms => u_mog("700", "root", "root");
 }
 
-bundle agent git_update
+bundle agent git_update(repodir)
 {
   vars:
-      "script"          string => '
-branch=`git symbolic-ref --short -q HEAD`
-if [ "$?" -ne 0 ]; then
-  exit 1
-fi
+      "id" string => canonify("$(repodir)");
 
-git remote update
-local=`git rev-parse $branch`
-remote=`git rev-parse origin/$branch`
+      "git_fetch_script" string => '
+git fetch || exit
+local=`git rev-parse HEAD`
+remote=`git rev-parse @{u}`
+base=`git merge-base HEAD @{u}`
 if [ $local = $remote ]; then
-    echo +up_to_date
+  echo +up_to_date
+elif [ $local = $base ]; then
+  echo +merge_required
+elif [ $remote = $base ]; then
+  echo +ahead_of_remote
 else
-    echo +pull_required
+  echo +diverged
 fi';
 
   classes:
-      "has_repository" expression => isdir("/root/fghijk.net");
+      "git_update_$(id)_error"
+        or => {
+          "ahead_of_remote",
+          "diverged",
+          "git_fetch_error",
+          "git_merge_error",
+        },
+        scope => "namespace";
+
+      "git_update_$(id)_kept"
+        expression => "up_to_date",
+        scope => "namespace";
+
+      "git_update_$(id)_repaired"
+        expression => "git_merge_repaired",
+        scope => "namespace";
+
+      "git_update_$(id)_ok"
+        or => {
+          "git_update_$(id)_kept",
+          "git_update_$(id)_repaired",
+        },
+        scope => "namespace";
 
   commands:
-    has_repository::
-      "/bin/sh -c '$(script)'"
+      "/bin/sh -c '$(git_fetch_script)'"
         module => "true",
-        contain => u_in_dir_silent("/var/cfengine"),
-        classes => u_local("exec_git_rev_parse");
+        contain => u_in_dir("$(repodir)"),
+        classes => u_local("git_fetch");
 
-    pull_required::
-      "/usr/bin/git pull"
-        contain => u_in_dir_silent("/var/cfengine"),
-        classes => u_local("exec_git_pull");
+    merge_required::
+      "/bin/sh -c 'git merge FETCH_HEAD'"
+        contain => u_in_dir("$(repodir)"),
+        classes => u_local("git_merge");
 
   reports:
     up_to_date.policy_debug_mode::
-      "Git repository '/var/cfengine' is up to date";
-    exec_git_pull_repaired::
-      "Git repository '/var/cfengine' was updated";
-    exec_git_rev_parse_error::
-      "ERROR: Failed to execute git rev-parse";
-    exec_git_pull::
-      "ERROR: Failed to execute git pull";
+      "Git repository $(repodir) is up to date";
+    merge_required::
+      "* Git repository $(repodir) was updated";
+    ahead_of_remote::
+      "ERROR: Git repository $(repodir) is ahead of tracking branch";
+    diverged::
+      "ERROR: Git repository $(repodir) has diverged from tracking branch";
+    git_fetch_error::
+      "ERROR: Fetch operation failed for git repository $(repodir)";
+    git_merge_error::
+      "ERROR: Merge operation failed for git repository $(repodir)";
 }
 
 body copy_from u_rcp(from,server)
@@ -124,7 +153,7 @@ body perms u_mog(mode, user, group)
   mode => "$(mode)";
 }
 
-body contain u_in_dir_silent(dir)
+body contain u_in_dir(dir)
 {
   chdir => "$(dir)";
   no_output => "true";
