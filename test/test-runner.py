@@ -88,10 +88,11 @@ class TestResult(Message):
         self.value = self.label + " " + bundle
 
 class CFAgentProcess(object):
-    CMD_TEMPLATE = "cf-agent -{0}Kf {1} -b {2}"
+    CMD_TEMPLATE = "cf-agent -{0}K{1} -f {2} -b {3}"
 
-    def __init__(self, filename, bundlesequence=[], opts=""):
-        cmdstr = self.CMD_TEMPLATE.format(opts, filename, ",".join(bundlesequence))
+    def __init__(self, filename, bundlesequence=[], opts="", classes_opt=""):
+        classes_opt = " -D " + classes_opt if classes_opt else ""
+        cmdstr = self.CMD_TEMPLATE.format(opts, classes_opt, filename, ",".join(bundlesequence))
         self.command = shlex.split(cmdstr)
 
     def execute(self):
@@ -207,7 +208,7 @@ class TestFile(object):
     BUNDLE_TAGS_KEY = "tags"
 
     def __init__(self, main_test_script, path, message_queue, stop_event,
-            bundle_expr=".*", opts=""):
+            bundle_expr=".*", opts="", classes_opt=""):
         self.valid = True
         self.path = path
         self.main_test_script = main_test_script
@@ -221,6 +222,7 @@ class TestFile(object):
         self.bundle_count = 0
         self.passed_count = 0
         self.opts = opts
+        self.classes_opt = classes_opt
 
     def _find_test_bundles(self):
         """
@@ -261,7 +263,11 @@ class TestFile(object):
             for i, bundle_dict in enumerate(ordered_dicts, start=1):
                 name = bundle_dict[self.BUNDLE_NAME_KEY]
                 tags = bundle_dict[self.BUNDLE_TAGS_KEY]
-                process = CFAgentProcess(self.main_test_script, [ name, "test:report_results" ], opts=self.opts)
+                process = CFAgentProcess(
+                    self.main_test_script,
+                    [ name, "test:report_results" ],
+                    opts=self.opts,
+                    classes_opt=self.classes_opt)
                 if re.match(self.bundle_expr, name):
                     self.testbundles.append(TestBundle(name, i, tags, process,
                         self.message_queue))
@@ -282,7 +288,7 @@ class TestFile(object):
 class TestSuite(threading.Thread):
     PATH_EXPR = "*"
     def __init__(self, main_test_script, tests_directory, queue, path_expr=PATH_EXPR,
-            bundle_expr=".*", opts=""):
+            bundle_expr=".*", opts="", classes_opt=""):
         super(TestSuite, self).__init__()
 
         self.queue = queue
@@ -295,7 +301,7 @@ class TestSuite(threading.Thread):
         ]
 
         self.test_files = [ TestFile(main_test_script, path, message_queue, self.done,
-            bundle_expr=bundle_expr, opts=opts) for path in sorted(test_paths) ]
+            bundle_expr=bundle_expr, opts=opts, classes_opt=classes_opt) for path in sorted(test_paths) ]
 
         self.total_count = 0
         self.passed_count = 0
@@ -367,6 +373,7 @@ parser.add_argument("-e", "--extraverbose", help="Increase output verbosity with
 parser.add_argument("-b", "--bundlesmatching", help="Run only bundles matching expression",
                     default=".*")
 parser.add_argument("-o", "--options", help="Options passed to cf-agent", default="")
+parser.add_argument("-D", "--define", help="Define a list of classes for cf-agent", default="")
 parser.add_argument("test", help="Name of test file without extension", nargs="?",
                     default=TestSuite.PATH_EXPR)
 args = parser.parse_args()
@@ -396,7 +403,8 @@ if __name__ == '__main__':
 
     test_suite = TestSuite(main_test_script, unit_test_dir, message_queue,
         path_expr=args.test, opts=args.options,
-        bundle_expr=args.bundlesmatching)
+        bundle_expr=args.bundlesmatching,
+        classes_opt=args.define)
     test_suite.start()
 
     try:
