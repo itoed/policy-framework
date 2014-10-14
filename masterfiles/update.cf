@@ -94,7 +94,7 @@ fi';
         classes => u_local("git_fetch");
 
     merge_required::
-      "/bin/sh -c 'git merge FETCH_HEAD'"
+      "/bin/sh -c 'git merge @{u}'"
         contain => u_in_dir("$(repodir)"),
         classes => u_local("git_merge");
 
