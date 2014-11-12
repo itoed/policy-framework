@@ -19,10 +19,6 @@ body file control
                 "$(inputs:components.common[file])",
                 "$(inputs:components.common[package])",
                 "$(inputs:components.common[service])",
-                "$(inputs:components.os[hosts])",
-                "$(inputs:components.os[iptables])",
-                "$(inputs:components.os[network])",
-                "$(inputs:components.os[swap])",
                 "$(inputs:components.os[yum])",
                 "$(inputs:components.platforms[jdk])",
                 #
@@ -38,10 +34,6 @@ bundle common knowledge
 {
   vars:
       "dependencies" slist => {
-                                "network",
-                                "hosts",
-                                "iptables",
-                                "swap",
                                 "yum",
                                 "nexus_client",
                                 "jdk",
@@ -289,23 +281,23 @@ bundle agent validate
 
   reports:
     version_error::
-      "ERROR: Expected field 'version'";
+      "ERROR (nexus.cf): Expected field 'version'";
     host_error::
-      "ERROR: Expected field 'host'";
+      "ERROR (nexus.cf): Expected field 'host'";
     repositories_error::
-      "ERROR: Expected field 'repositories'";
+      "ERROR (nexus.cf): Expected field 'repositories'";
     default:any::
-      "ERROR: Expected firstName field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected firstName field for user '$(user_id)'"
         ifvarclass => "users_first_name_$(user_id)_error";
-      "ERROR: Expected lastName field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected lastName field for user '$(user_id)'"
         ifvarclass => "users_last_name_$(user_id)_error";
-      "ERROR: Expected password field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected password field for user '$(user_id)'"
         ifvarclass => "users_password_$(user_id)_error";
-      "ERROR: Expected status field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected status field for user '$(user_id)'"
         ifvarclass => "users_status_$(user_id)_error";
-      "ERROR: Expected email field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected email field for user '$(user_id)'"
         ifvarclass => "users_email_$(user_id)_error";
-      "ERROR: Expected roles field for user '$(user_id)'"
+      "ERROR (nexus.cf): Expected roles field for user '$(user_id)'"
         ifvarclass => "users_roles_$(user_id)_error";
 }
 

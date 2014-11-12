@@ -43,6 +43,7 @@ task dockerCreateContainer(type: Exec) {
     dependsOn selinuxChangeContext
     executable 'docker'
     args = [ 'create', '-ti', '--name', dockerContainer,
+        '-p', '38081:8081',
         '-v', "$buildDir/cfengine/masterfiles:/root/masterfiles:ro",
         '-v', "$buildDir/cfengine/modules:/root/modules:ro",
         dockerImage, 'bash' ]

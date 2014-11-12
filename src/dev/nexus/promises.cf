@@ -13,10 +13,213 @@ body common control
 
 bundle agent main
 {
-  files:
-      "/tmp/okiedokie"
-        create => "true";
-
   methods:
       "run" usebundle => setup:run;
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+                                "nexus",
+                              }, meta => { "dependencies" };
+}
+
+bundle agent yum
+{
+  meta:
+      "tags" slist => { "info=yum" };
+
+  vars:
+      "nexus_baseurl" string => "http://nexus.fghijk.net/content/repositories";
+      "nexus_username" string => "admin";
+      "nexus_password" string => "P!55word";
+
+      "info"                    data => parsejson('{
+        "repos": {
+          "rpms": {
+            "name": "FGHIJK RPM Repository",
+            "baseurl": "$(nexus_baseurl)/rpms/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "centos-6": {
+            "name": "CentOS Base Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "centos-6-updates": {
+            "name": "CentOS Updates Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6-updates/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "epel": {
+            "name": "EPEL Mirror",
+            "baseurl": "$(nexus_baseurl)/epel/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "puias": {
+            "name": "PUIAS Mirror",
+            "baseurl": "$(nexus_baseurl)/puias/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "jenkins": {
+            "name": "Jenkins Continuous Integration Server",
+            "baseurl": "$(nexus_baseurl)/jenkins-ci/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "mysql": {
+            "name": "MySQL 5.6 Community Server Mirror",
+            "baseurl": "$(nexus_baseurl)/mysql56-community/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          }
+        }
+      }');
+}
+
+bundle agent jdk
+{
+  meta:
+      "tags" slist => { "info=jdk" };
+
+  vars:
+      "info" data => parsejson('{ "version": "1.7.0-55" }');
+}
+
+bundle agent createrepo
+{
+  meta:
+      "tags" slist => { "info=createrepo" };
+
+  vars:
+      "info" data => parsejson('{ "version": "0.9.9-18.el6" }');
+}
+
+bundle agent python_lxml
+{
+  meta:
+      "tags" slist => { "info=python_lxml" };
+
+  vars:
+      "info" data => parsejson('{ "version": "2.2.3-1.1.el6" }');
+}
+
+bundle agent shiro_hasher
+{
+  meta:
+      "tags" slist => { "info=shiro_hasher" };
+
+  vars:
+      "info" data => parsejson('{ "version": "0.1-1" }');
+}
+
+bundle agent nexus
+{
+  meta:
+      "tags" slist => { "info=nexus" };
+
+  vars:
+      "info" data => parsejson('{
+        "host": "nexus.fghijk.local",
+        "version": "2.7.2-03",
+        "ruby_plugin_version": "1.4.1-1",
+        "users": {
+          "admin": {
+            "firstName": "Administrator",
+            "lastName": "User",
+            "password": "okie!dokie"
+            "status": "active",
+            "email": "changeme@yourcompany.com",
+            "roles": [ "nx-admin" ]
+          },
+          "anonymous" {
+            "firstName": "Nexus",
+            "lastName": "Anonymous User",
+            "password": "anonymous",
+            "status": "active",
+            "email": "changeme@yourcompany.com",
+            "roles": [ "fghijk-anonymous" ]
+          }
+        },
+        "repositories": {
+          "central": {
+            "name": "Central",
+            "remote_url": "http://repo1.maven.org/maven2/",
+          },
+          "apache-snapshots": {
+            "name": "Apache Snapshots",
+            "remote_url": "http://repository.apache.org/snapshots/",
+            "repository_policy": "SNAPSHOT"
+          },
+          "codehaus-snapshots": {
+            "name": "Codehaus Snapshots",
+            "remote_url": "http://nexus.codehaus.org/snapshots/",
+            "repository_policy": "SNAPSHOT"
+          },
+          "releases": {
+            "name": "Releases"
+          },
+          "snapshots": {
+            "name": "Snapshots",
+            "repository_policy": "SNAPSHOT"
+          },
+          "thirdparty": {
+            "name": "3rd party"
+          },
+          "depot": {
+            "name": "FGHIJK Depot"
+          },
+          "centos-6": {
+            "name": "CentOS 6",
+            "remote_url": "http://mirror.centos.org/centos/6.5/os/x86_64/"
+          },
+          "centos-6-updates": {
+            "name": "CentOS 6 Updates",
+            "remote_url": "http://mirror.centos.org/centos/6.5/updates/x86_64/"
+          },
+          "epel": {
+            "name": "EPEL",
+            "remote_url": "http://mirror.csclub.uwaterloo.ca/fedora/epel/6Server/x86_64/"
+          },
+          "puias": {
+            "name": "PUIAS",
+            "remote_url": "http://springdale.math.ias.edu/data/puias/computational/6.5/x86_64/"
+          },
+          "rpms": {
+            "name": "FGHIJK RPM Releases",
+            "type": "rpms"
+          },
+          "rubygems": {
+            "name": "RubyGems",
+            "remote_url": "http://rubygems.org/",
+            "repository_policy": "MIXED",
+            "provider_hint": "rubygems-proxy"
+          },
+          "mysql56-community": {
+            "name": "MySQL 5.6 Community Server",
+            "remote_url": "http://repo.mysql.com/yum/mysql-5.6-community/el/6/x86_64/"
+          },
+          "jenkins-ci": {
+            "name": "Jenkins Continuous Integration Server",
+            "remote_url": "http://pkg.jenkins-ci.org/redhat/"
+          },
+          "nginx": {
+            "name": "Nginx HTTP Server",
+            "remote_url": "http://nginx.org/packages/centos/6/x86_64/"
+          }
+        }
+      }');
 }
