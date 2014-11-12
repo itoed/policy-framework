@@ -5,6 +5,11 @@ from __future__ import print_function
 import json
 import sys
 
+class Authentication(object):
+    def __init__(self, username, password):
+      self.username = username
+      self.password = password
+
 class Repository(object):
     REPOSITORY_POLICIES = [ "RELEASE", "SNAPSHOT", "MIXED" ]
     PROVIDER_HINTS = [ "maven2", "rubygems-proxy" ]
@@ -19,6 +24,7 @@ class Repository(object):
         self.repo_policy = "RELEASE"
         self.provider_hint = "maven2"
         self.write_policy = None
+        self.authentication = None
 
     @property
     def data(self):
@@ -38,6 +44,11 @@ class Repository(object):
 
         if self.remote_url:
             data["remoteStorage"] = { "url": self.remote_url }
+            if self.authentication:
+                data["remoteStorage"]["authentication"] = {
+                  "username": self.authentication.username,
+                  "password": self.authentication.password
+                }
             data["notFoundCacheActive"] = True
             data["remoteRepositoryAccess"] = {
               "artifactMaxAge": self.artifact_max_age
@@ -165,6 +176,11 @@ class ArgumentParser(object):
 
             if "remote_url" in repo_arg:
                 repo.remote_url = repo_arg["remote_url"]
+
+            if "authentication" in repo_arg:
+                username = repo_arg["authentication"]["username"]
+                password = repo_arg["authentication"]["password"]
+                repo.authentication = Authentication(username, password)
 
             if "repository_policy" in repo_arg:
                 repo_policy = repo_arg["repository_policy"]

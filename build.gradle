@@ -65,13 +65,13 @@ task dockerStartContainer(type: Exec) {
     args = [ 'start', '-i', dockerContainer ]
 }
 
-task dockerCfagentUpdate(type: Exec) {
+task dockerExecCfagentUpdate(type: Exec) {
     executable 'docker'
     args = [ 'exec', dockerContainer, 'cf-agent', '-Kf', '/root/update.cf' ]
 }
 
-task dockerCfagentRun(type: Exec) {
-    dependsOn dockerCfagentUpdate
+task dockerExecCfagent(type: Exec) {
+    dependsOn dockerExecCfagentUpdate
     executable 'docker'
     args = [ 'exec', dockerContainer, 'cf-agent', '-KD', 'policy_debug_mode' ]
 }

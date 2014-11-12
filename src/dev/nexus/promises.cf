@@ -199,8 +199,12 @@ bundle agent nexus
             "remote_url": "http://springdale.math.ias.edu/data/puias/computational/6.5/x86_64/"
           },
           "rpms": {
-            "name": "FGHIJK RPM Releases",
-            "type": "rpms"
+            "name": "FGHIJK RPM Mirror",
+            "remote_url": "http://nexus.fghijk.net/content/repositories/rpms"
+            "authentication": {
+              "username": "admin",
+              "password": "P!55word",
+            }
           },
           "rubygems": {
             "name": "RubyGems",

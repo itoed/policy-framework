@@ -45,6 +45,12 @@
       {{#remoteStorage}}
       <remoteStorage>
         <url>{{url}}</url>
+        {{#authentication}}
+        <authentication>
+          <username>{{username}}</username>
+          <password>{{password}}</password>
+        </authentication>
+        {{/authentication}}
       </remoteStorage>
       {{/remoteStorage}}
       <externalConfiguration>
