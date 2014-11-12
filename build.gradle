@@ -1,0 +1,76 @@
+version = '0.0.1'
+
+ext {
+    mainDir = "$rootDir/src/main"
+    devDir = "$rootDir/src/dev"
+    dockerImage = 'fghijk/cfengine_dev'
+    dockerContainer = 'policy_framework_dev'
+}
+
+task clean(type: Delete) {
+    delete buildDir
+}
+
+task copyMasterfiles(type: Copy) {
+    from "$mainDir/cfengine"
+    into "$buildDir/cfengine/masterfiles"
+}
+
+task copyModules(type: Copy) {
+    from "$mainDir/modules"
+    into "$buildDir/cfengine/modules"
+}
+
+task build {
+    dependsOn copyMasterfiles, copyModules
+}
+
+task devCopyNexusMasterfiles(type: Copy) {
+    dependsOn build
+    from "$devDir/nexus/promises.cf"
+    into "$buildDir/cfengine/masterfiles"
+}
+
+task devBuildNexus {
+    dependsOn devCopyNexusMasterfiles
+}
+
+task selinuxChangeContext(type: Exec) {
+    commandLine 'chcon', '-Rt', 'svirt_sandbox_file_t', "$buildDir"
+}
+
+task dockerCreateContainer(type: Exec) {
+    dependsOn selinuxChangeContext
+    executable 'docker'
+    args = [ 'create', '-ti', '--name', dockerContainer,
+        '-v', "$buildDir/cfengine/masterfiles:/root/masterfiles:ro",
+        '-v', "$buildDir/cfengine/modules:/root/modules:ro",
+        dockerImage, 'bash' ]
+}
+
+task dockerStopContainer(type: Exec) {
+    executable 'docker'
+    args = [ 'stop', dockerContainer ]
+}
+
+task dockerRemoveContainer(type: Exec) {
+    dependsOn dockerStopContainer
+    executable 'docker'
+    args = [ 'rm',dockerContainer ] 
+}
+
+task dockerStartContainer(type: Exec) {
+    executable 'docker'
+    args = [ 'start', '-i', dockerContainer ]
+}
+
+task dockerCfagentUpdate(type: Exec) {
+    executable 'docker'
+    args = [ 'exec', dockerContainer, 'cf-agent', '-Kf', '/root/update.cf' ]
+}
+
+task dockerCfagentRun(type: Exec) {
+    dependsOn dockerCfagentUpdate
+    executable 'docker'
+    args = [ 'exec', dockerContainer, 'cf-agent', '-KD', 'policy_debug_mode' ]
+}

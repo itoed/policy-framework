@@ -1,0 +1,22 @@
+# PROMISES
+#
+
+body common control
+{
+  inputs => {
+              "inputs.cf",
+              "setup.cf",
+              "$(inputs:components.daemons[nexus])",
+            };
+  bundlesequence  => { "main" };
+}
+
+bundle agent main
+{
+  files:
+      "/tmp/okiedokie"
+        create => "true";
+
+  methods:
+      "run" usebundle => setup:run;
+}
