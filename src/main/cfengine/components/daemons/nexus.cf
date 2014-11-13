@@ -491,6 +491,12 @@ bundle agent sonatype_workdir
         "owner": "$(config.nexus_username)",
       }');
 
+      "storagedir" usebundle => file:edit_dir('{
+        "id": "nexus_storagedir",
+        "path": "$(config.sonatype_workdir)/nexus/storage",
+        "owner": "$(config.nexus_username)"
+      }');
+
       "nexus_workdir" usebundle => file:edit_dir('{
         "id": "nexus_workdir",
         "path": "$(config.nexus_workdir)",
@@ -511,6 +517,7 @@ bundle agent sonatype_workdir
 
       "batch" usebundle => class:batch("nexus_sonatype_workdir", '[
         "file:edit_dir_nexus_sonatype_workdir",
+        "file:edit_dir_nexus_storagedir",
         "file:edit_dir_nexus_workdir",
         "file:edit_dir_nexus_confdir",
         "nexus:nexus_xml_file",
