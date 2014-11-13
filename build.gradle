@@ -1,3 +1,12 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.eclipse.jgit:org.eclipse.jgit:3.5.0.201409260305-r'
+    }
+}
+
 version = '0.0.1'
 
 ext {
@@ -5,38 +14,75 @@ ext {
     devDir = "$rootDir/src/dev"
     dockerImage = 'fghijk/cfengine_dev'
     dockerContainer = 'policy_framework_dev'
+    artifactDir = "$buildDir/artifact"
+    dockerDir = "$buildDir/docker"
+    artifactRemoteUrl = rootDir
+    artifactRemoteRef = 'refs/heads/build'
+    projectGit = new GitRepository()
 }
+
+projectGit.open("$rootDir")
 
 task clean(type: Delete) {
     delete buildDir
 }
 
+// When a file that has been copied to artifactDir is deleted at its source,
+// this task ensures it will be deleted in the artifactDir
+task cleanArtifactDir(type: Delete) {
+  delete artifactDir
+}
+
+task copyResources(type: Copy) {
+    outputs.upToDateWhen { false }
+    dependsOn cleanArtifactDir
+    from("$mainDir/resources") {
+        include 'gitignore.txt'
+        rename 'gitignore.txt', '.gitignore'
+    }
+    into artifactDir
+}
+
 task copyMasterfiles(type: Copy) {
+    dependsOn cleanArtifactDir
     from "$mainDir/cfengine"
-    into "$buildDir/cfengine/masterfiles"
+    exclude '**/*.swp'
+    into "$artifactDir/masterfiles"
 }
 
 task copyModules(type: Copy) {
+    dependsOn cleanArtifactDir
     from "$mainDir/modules"
-    into "$buildDir/cfengine/modules"
+    exclude '**/*.swp'
+    exclude '**/*.pyc'
+    into "$artifactDir/modules"
 }
 
 task build {
-    dependsOn copyMasterfiles, copyModules
+    dependsOn copyResources, copyMasterfiles, copyModules
 }
 
-task devCopyNexusMasterfiles(type: Copy) {
-    dependsOn build
-    from "$devDir/nexus/promises.cf"
-    into "$buildDir/cfengine/masterfiles"
+file(devDir).eachDir { dir ->
+    def label = GUtil.toCamelCase(dir.name)
+
+    task "devCopy$label" (type: Copy) {
+      dependsOn build
+      group 'development'
+      from dir
+      into "$artifactDir/masterfiles"
+    }
 }
 
-task devBuildNexus {
-    dependsOn devCopyNexusMasterfiles
+// Files are synced in this directory so that docker volumes within
+// don't require to be remounted as often as the artifact directory is cleaned
+task syncDockerDir(type: Sync) {
+    from artifactDir
+    into dockerDir
 }
 
 task selinuxChangeContext(type: Exec) {
-    commandLine 'chcon', '-Rt', 'svirt_sandbox_file_t', "$buildDir"
+    dependsOn syncDockerDir
+    commandLine 'chcon', '-Rt', 'svirt_sandbox_file_t', dockerDir
 }
 
 task dockerCreateContainer(type: Exec) {
@@ -44,8 +90,8 @@ task dockerCreateContainer(type: Exec) {
     executable 'docker'
     args = [ 'create', '-ti', '--name', dockerContainer,
         '-p', '38081:8081',
-        '-v', "$buildDir/cfengine/masterfiles:/root/masterfiles:ro",
-        '-v', "$buildDir/cfengine/modules:/root/modules:ro",
+        '-v', "$dockerDir/masterfiles:/root/masterfiles:ro",
+        '-v', "$dockerDir/modules:/root/modules:ro",
         dockerImage, 'bash' ]
 }
 
@@ -66,6 +112,7 @@ task dockerStartContainer(type: Exec) {
 }
 
 task dockerExecCfagentUpdate(type: Exec) {
+    dependsOn syncDockerDir
     executable 'docker'
     args = [ 'exec', dockerContainer, 'cf-agent', '-Kf', '/root/update.cf' ]
 }
@@ -74,4 +121,427 @@ task dockerExecCfagent(type: Exec) {
     dependsOn dockerExecCfagentUpdate
     executable 'docker'
     args = [ 'exec', dockerContainer, 'cf-agent', '-KD', 'policy_debug_mode' ]
+}
+
+/*
+ * Git Artifact tasks
+ */
+
+def gitRepository = new GitRepository()
+
+task gitInitArtifactBuild (type: GitInit) {
+    dependsOn build
+    git = gitRepository
+    dirname = artifactDir
+}
+
+task gitFetchArtifactBuild (type: GitFetch) {
+    dependsOn gitInitArtifactBuild
+    git = gitRepository
+    force = true
+    repository = artifactRemoteUrl
+    srcRef = artifactRemoteRef
+    dstRef = 'refs/heads/master'
+}
+
+task gitSetHeadArtifactBuild (type: GitSymbolicRef) {
+    dependsOn gitFetchArtifactBuild
+    git = gitRepository
+    refname = 'HEAD'
+    newValue = 'refs/heads/master'
+}
+
+task gitAddArtifactBuild (type: GitAdd) {
+    dependsOn gitSetHeadArtifactBuild
+    git = gitRepository
+    doLast { git.diff(cached: true).each { println "  $it" } }
+}
+
+task gitCommitArtifactBuild (type: GitCommit) {
+    dependsOn gitAddArtifactBuild
+    git = gitRepository
+    message = "Build ${nextVersion()} from $projectGit.branch branch"
+}
+
+task gitPushArtifactBuild (type: GitPush) {
+    dependsOn gitCommitArtifactBuild
+    git = gitRepository
+    repository = artifactRemoteUrl
+    srcRef = 'refs/heads/master'
+    dstRef = artifactRemoteRef
+}
+
+/*
+ * Git task classes
+ */
+
+class GitTask extends DefaultTask {
+    GitRepository git
+}
+
+class GitAdd extends GitTask {
+    GitAdd() { outputs.upToDateWhen { git.statusClean } }
+
+    @TaskAction
+    void executeTask() {
+        if (!git.statusClean) {
+            git.addAll()
+        }
+    }
+}
+class GitClean extends GitTask {
+    GitClean() { outputs.upToDateWhen { !git.untrackedFiles } }
+
+    @TaskAction
+    void executeTask() {
+        git.clean()
+    }
+}
+
+class GitCheckout extends GitTask {
+    String branch
+    boolean create
+    boolean force
+
+    GitCheckout() { outputs.upToDateWhen { git.head == git.getRefName(branch) } }
+
+    @TaskAction
+    void executeTask() {
+        git.checkout(branch, create: create, force: force)
+    }
+}
+
+class GitCommit extends GitTask {
+    String message
+
+    GitCommit() { outputs.upToDateWhen { git.statusClean } }
+
+    @TaskAction
+    void executeTask() {
+        if (!git.statusClean) {
+            git.commit(message)
+        }
+    }
+}
+
+class GitFetch extends GitTask {
+    boolean force
+    String repository
+    String srcRef
+    String dstRef
+
+    GitFetch() {
+        outputs.upToDateWhen {
+            git.getRemoteRefId(repository, srcRef) == git.getRefId(dstRef)
+        }
+    }
+
+    @TaskAction
+    void executeTask() {
+        if (git.getRemoteRefId(repository, srcRef)) {
+            git.fetch("$srcRef:$dstRef", repository, force:force)
+        }
+    }
+}
+
+class GitInit extends GitTask {
+    String dirname
+
+    GitInit() {
+        outputs.upToDateWhen {
+            if (git.isRepository(dirname)) {
+                git.open(dirname)
+                true
+            }
+        }
+    }
+
+    @TaskAction
+    void executeTask() {
+        if (!git.isRepository(dirname)) {
+            git.init(dirname)
+        }
+    }
+}
+
+class GitPush extends GitTask {
+    String repository
+    String srcRef
+    String dstRef
+
+    GitPush() {
+        outputs.upToDateWhen {
+            git.getRefId(srcRef) == git.getRemoteRefId(repository, dstRef)
+        }
+    }
+
+    @TaskAction
+    void executeTask() {
+        if (git.getRefId(srcRef) != git.getRemoteRefId(repository, dstRef)) {
+            git.push(repository, "$srcRef:$dstRef")
+        }
+    }
+}
+
+class GitReset extends GitTask {
+    String ref
+    boolean hard
+
+    GitReset() {
+        outputs.upToDateWhen { !(git.diff() || git.diff(cached: true)) }
+    }
+
+    @TaskAction
+    void executeTask() {
+        git.reset(hard: hard)
+    }
+}
+
+class GitSymbolicRef extends GitTask {
+    String refname
+    String newValue
+
+    GitSymbolicRef() { outputs.upToDateWhen { git.getSymbolicRef(refname) == newValue } }
+
+    @TaskAction
+    void executeTask() {
+        if (git.getSymbolicRef(refname) != newValue) {
+            git.setSymbolicRef(refname, newValue)
+        }
+    }
+}
+
+/*
+ *  Support classes
+ */
+
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.api.ResetCommand.ResetType
+import org.eclipse.jgit.diff.DiffEntry
+import org.eclipse.jgit.lib.ObjectId
+import org.eclipse.jgit.lib.RepositoryCache.FileKey
+import org.eclipse.jgit.lib.RefUpdate
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevTag
+import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.RemoteRefUpdate
+import org.eclipse.jgit.util.FS
+
+class GitRepository {
+    private Git git
+    private static final FETCH_OK_RESULTS = [
+        RefUpdate.Result.FAST_FORWARD,
+        RefUpdate.Result.FORCED,
+        RefUpdate.Result.NEW
+    ]
+
+    void addAll() {
+        git.add().addFilepattern('.').call()
+    }
+
+    void checkout(Map options = [:], branch) {
+        def fullBranch = getRefName(branch)
+        def create = options.create && !git.branchList().call()
+            .any { it.name == fullBranch }
+
+        git.checkout().setName(branch)
+            .setForce(options.force).setCreateBranch(create).call()
+    }
+
+    void clean() {
+        git.clean().call()
+    }
+
+    void commit(message) {
+        git.commit().setMessage(message).call()
+    }
+
+    /**
+     * Returns a diff as specified by the given options
+     * @param options (cached: default false)
+     * @return
+     */
+    Iterable<String> diff(Map options = [ cached: false ]) {
+        def entries = git.diff().setCached(options.cached).call()
+        if (!options.cached) {
+            entries = entries.findAll { it.changeType != DiffEntry.ChangeType.ADD }
+        }
+        entries.collect { formatDiffEntry(it) }
+    }
+
+    /**
+     * Executes the fetch command.
+     *
+     * Acknowledged differences:
+     *  - behaves as if called with --update-head-ok
+     *
+     * @param options
+     *  - force
+     * @param refspec
+     * @param repository can be a URL or name of remote
+     */
+    void fetch(Map options = [:], String refspec, String repository = 'origin') {
+        def result = git.fetch().setRemote(repository)
+            .setRefSpecs(new RefSpec(refspec).setForceUpdate(options.force ?: false))
+            .call()
+
+        result.trackingRefUpdates.each {
+            if (!(it.result in FETCH_OK_RESULTS)) {
+                throw new Exception("Failed while fetching $refspec: $it.result")
+            }
+        }
+    }
+
+    Iterable<AnnotatedTag> getAnnotatedTags() {
+        def revWalk = new RevWalk(git.repository)
+        git.tagList().call()
+            .collect { git.repository.peel(it) }
+            .findAll { it.peeledObjectId }
+            .collect {
+                def revTag = revWalk.parseTag(it.objectId)
+                def revCommit = revWalk.parseCommit(it.peeledObjectId)
+                new AnnotatedTag(revTag, revCommit)
+            }
+    }
+
+    String getBranch() {
+        git.repository.branch
+    }
+
+    String getHead() {
+        git.repository.fullBranch
+    }
+
+    String getRefId(String refname) {
+        def objectId = git.repository.resolve(refname)
+        objectId ? ObjectId.toString(objectId) : null
+    }
+
+    String getRefName(String refname) {
+        git.repository.getRef(refname)?.name
+    }
+
+    /*
+     *  remote: URL or name of a remote, e.g. 'origin'
+     */
+    String getRemoteRefId(String remote, String refname) {
+        def ref = git.lsRemote().setRemote(remote).call()
+            .find { it.name == refname }
+        ref ? ObjectId.toString(ref.objectId) : null
+    }
+
+    String getSymbolicRef(String refname) {
+        def ref = git.repository.getRef(refname)
+        ref.isSymbolic() ? ref.target.name : null
+    }
+
+    Iterable<String> getUntrackedFiles() {
+        git.status().call().untracked
+    }
+
+    void init(String dirname) {
+        git = Git.init().setDirectory(new File(dirname)).call()
+    }
+
+    boolean isMergedInto(refA, refB) {
+        def revWalk = new RevWalk(git.repository)
+        def commitA = revWalk.parseCommit(git.repository.resolve(refA))
+        def commitB = revWalk.parseCommit(git.repository.resolve(refB))
+        revWalk.isMergedInto(commitA, commitB)
+    }
+
+    boolean isRepository(String dirname) {
+        FileKey.isGitRepository(new File(dirname, '.git'), FS.DETECTED)
+    }
+
+    boolean isStatusClean() {
+        git.status().call().clean
+    }
+
+    void open(String dirname) {
+        git = Git.open(new File(dirname, '.git'))
+    }
+
+    /**
+     * Executes a git push 
+     * @param repository can be a URL or name of remote
+     * @param refspec what destination ref to update with what source object
+     */
+    void push(String repository, String refspec) {
+        def errors = git.push().setRemote(repository).setRefSpecs(new RefSpec(refspec))
+            .call()
+            .collect { it.remoteUpdates }
+            .flatten()
+            .findAll { it.status != RemoteRefUpdate.Status.OK }
+
+        if (errors) {
+            throw new Exception("Could not push: ${errors.join('\n')}")
+        }
+    }
+
+    void reset(Map options = [:]) {
+        git.reset().setMode(ResetType.MIXED).call()
+        if (options.hard) {
+            git.reset().setMode(ResetType.HARD).call()
+        }
+    }
+
+    void setSymbolicRef(refname, newValue) {
+        git.repository.updateRef(refname).link(newValue)
+    }
+
+    private static String formatDiffEntry(DiffEntry entry) {
+        StringBuilder buf = new StringBuilder();
+        buf.append(entry.changeType);
+        buf.append(" ");
+        switch (entry.changeType) {
+            case DiffEntry.ChangeType.ADD:
+                buf.append(entry.newPath);
+                break;
+            case DiffEntry.ChangeType.COPY:
+                buf.append(entry.oldPath + "->" + entry.newPath);
+                break;
+            case DiffEntry.ChangeType.DELETE:
+                buf.append(entry.oldPath);
+                break;
+            case DiffEntry.ChangeType.MODIFY:
+                buf.append(entry.oldPath);
+                break;
+            case DiffEntry.ChangeType.RENAME:
+                buf.append(entry.oldPath + "->" + entry.newPath);
+                break;
+        }
+        buf.toString();
+    }
+
+    private class AnnotatedTag {
+        private RevTag revTag
+        private RevCommit revCommit
+
+        AnnotatedTag(revTag, revCommit) {
+            this.revTag = revTag
+            this.revCommit = revCommit
+        }
+
+        Date getWhen() { revTag.taggerIdent.when }
+        String getName() { revTag.tagName }
+        String getCommitId() { ObjectId.toString(revCommit) }
+    }
+}
+
+def nextVersion() {
+    def versionTags = projectGit.annotatedTags
+        .findAll { it.name =~ /^v\d+\.\d+\.\d+$/ &&
+            projectGit.isMergedInto(it.commitId, 'HEAD') }
+        .sort { a, b ->
+            if (a.commitId == b.commitId) { a.when <=> b.when }
+            else { projectGit.isMergedInto(a.commitId, b.commitId) ? -1 : 1 }
+        }
+
+    def latestVersion = versionTags.empty ?
+        VersionNumber.parse('0.0.0') :
+        VersionNumber.parse(versionTags.last().name.substring(1))
+
+    "${latestVersion.major}.${latestVersion.minor}.${latestVersion.micro + 1}-SNAPSHOT"
 }
