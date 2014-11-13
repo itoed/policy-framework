@@ -533,13 +533,13 @@ bundle agent nexus_xml_file
           "repository_targets");
 
     config_parser_ok::
-      "template_data" string => format('{
+      "template_data" data => parsejson('{
         "nexusVersion": "$(config.version)",
         "baseUrl": "http://$(config.host)$(config.context_path)",
-        "repositories": %S,
-        "repositoryTargets": %S
-      }', "default:nexus_config_parser.data[repositories]",
-          "default:nexus_config_parser.data[repository_targets]");
+      }');
+
+      "template_data" data => mergedata("template_data",
+        "default:nexus_config_parser.data");
 
   classes:
       "has_repositories" expression => isvariable("repositories");
@@ -554,30 +554,29 @@ bundle agent nexus_xml_file
                 "config_parser_module_error",
                 "config_parser_error",
                 "template_data_error",
-                "file:edit_file_nexus_xml_file_error",
+                "file:edit_file_with_template_nexus_xml_file_error",
               }, scope => "namespace";
     !nexus_xml_file_error::
       "nexus_xml_file_kept"
-        or => { "file:edit_file_nexus_xml_file_kept", "!has_repositories" },
+        or => { "file:edit_file_with_template_nexus_xml_file_kept", "!has_repositories" },
         scope => "namespace";
       "nexus_xml_file_repaired"
-        expression => "file:edit_file_nexus_xml_file_repaired",
+        expression => "file:edit_file_with_template_nexus_xml_file_repaired",
         scope => "namespace";
       "nexus_xml_file_ok"
-        or => { "file:edit_file_nexus_xml_file_ok", "!has_repositories" },
+        or => { "file:edit_file_with_template_nexus_xml_file_ok", "!has_repositories" },
         scope => "namespace";
 
   methods:
     config_parser_ok.!nexus_xml_file_error::
-      "nexus_xml_file" usebundle => file:edit_file('{
+      "nexus_xml_file" usebundle => file:edit_file_with_template('{
         "id": "nexus_xml_file",
         "path": "$(config.nexus_xml_file)",
         "owner": "$(config.nexus_username)",
         "mode": "644",
         "create": "true",
-        "template": "$(config.nexus_xml_template)",
-        "template_data": $(template_data)
-      }');
+        "template": "$(config.nexus_xml_template)"
+      }', @(template_data));
 
   commands:
     has_repositories.!nexus_xml_file_error::
