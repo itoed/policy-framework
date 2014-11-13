@@ -1,0 +1,179 @@
+# PROMISES
+#
+
+body common control
+{
+  inputs => {
+              "inputs.cf",
+              "setup.cf",
+              "$(inputs:components.daemons[nexus])",
+            };
+  bundlesequence  => { "main" };
+}
+
+bundle agent main
+{
+  methods:
+      "run" usebundle => setup:run;
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+                                "nexus",
+                              }, meta => { "dependencies" };
+}
+
+bundle agent yum
+{
+  meta:
+      "tags" slist => { "info=yum" };
+
+  vars:
+      "nexus_baseurl" string => "http://nexus.fghijk.net/content/repositories";
+      "nexus_username" string => "admin";
+      "nexus_password" string => "P!55word";
+
+      "info"                    data => parsejson('{
+        "repos": {
+          "rpms": {
+            "name": "FGHIJK RPM Repository",
+            "baseurl": "$(nexus_baseurl)/rpms/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "centos-6": {
+            "name": "CentOS Base Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          },
+          "centos-6-updates": {
+            "name": "CentOS Updates Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6-updates/",
+            "username": "$(nexus_username)",
+            "password": "$(nexus_password)",
+            "skip_if_unavailable": true
+          }
+        }
+      }');
+}
+
+bundle agent jdk
+{
+  meta:
+      "tags" slist => { "info=jdk" };
+
+  vars:
+      "info" data => parsejson('{ "version": "1.7.0-55" }');
+}
+
+bundle agent nexus
+{
+  meta:
+      "tags" slist => { "info=nexus" };
+
+  vars:
+      "remote_username" string => "admin";
+      "remote_password" string => "P!55word";
+
+      "info" data => parsejson('{
+        "host": "nexus.fghijk.local",
+        "version": "2.7.2-03",
+        "ruby_plugin_version": "1.4.1-1",
+        "repositories": {
+          "central": {
+            "name": "Central",
+            "remote_url": "http://repo1.maven.org/maven2/",
+          },
+          "apache-snapshots": {
+            "name": "Apache Snapshots",
+            "remote_url": "http://repository.apache.org/snapshots/",
+            "repository_policy": "SNAPSHOT"
+          },
+          "codehaus-snapshots": {
+            "name": "Codehaus Snapshots",
+            "remote_url": "http://nexus.codehaus.org/snapshots/",
+            "repository_policy": "SNAPSHOT"
+          },
+          "releases": {
+            "name": "Releases",
+            "remote_url": "http://nexus.fghijk.net/content/repositories/releases/",
+            "authentication": {
+              "username": "$(remote_username)",
+              "password": "$(remote_password)"
+            }
+          },
+          "snapshots": {
+            "name": "Snapshots",
+            "repository_policy": "SNAPSHOT",
+            "remote_url": "http://nexus.fghijk.net/content/repositories/snapshots/",
+            "authentication": {
+              "username": "$(remote_username)",
+              "password": "$(remote_password)"
+            }
+          },
+          "thirdparty": {
+            "name": "3rd party",
+            "remote_url": "http://nexus.fghijk.net/content/repositories/thirdparty/",
+            "authentication": {
+              "username": "$(remote_username)",
+              "password": "$(remote_password)"
+            }
+          },
+          "depot": {
+            "name": "FGHIJK Depot"
+            "remote_url": "http://nexus.fghijk.net/content/repositories/depot/",
+            "authentication": {
+              "username": "$(remote_username)",
+              "password": "$(remote_password)"
+            }
+          },
+          "centos-6": {
+            "name": "CentOS 6",
+            "remote_url": "http://mirror.centos.org/centos/6.5/os/x86_64/"
+          },
+          "centos-6-updates": {
+            "name": "CentOS 6 Updates",
+            "remote_url": "http://mirror.centos.org/centos/6.5/updates/x86_64/"
+          },
+          "epel": {
+            "name": "EPEL",
+            "remote_url": "http://fedora-epel.mirror.iweb.com/6Server/x86_64/"
+          },
+          "puias": {
+            "name": "PUIAS",
+            "remote_url": "http://springdale.math.ias.edu/data/puias/computational/6.5/x86_64/"
+          },
+          "rpms": {
+            "name": "FGHIJK RPM Mirror",
+            "remote_url": "http://nexus.fghijk.net/content/repositories/rpms/",
+            "authentication": {
+              "username": "$(remote_username)",
+              "password": "$(remote_password)"
+            }
+          },
+          "rubygems": {
+            "name": "RubyGems",
+            "remote_url": "http://rubygems.org/",
+            "repository_policy": "MIXED",
+            "provider_hint": "rubygems-proxy"
+          },
+          "mysql56-community": {
+            "name": "MySQL 5.6 Community Server",
+            "remote_url": "http://repo.mysql.com/yum/mysql-5.6-community/el/6/x86_64/"
+          },
+          "jenkins-ci": {
+            "name": "Jenkins Continuous Integration Server",
+            "remote_url": "http://pkg.jenkins-ci.org/redhat/"
+          },
+          "nginx": {
+            "name": "Nginx HTTP Server",
+            "remote_url": "http://nginx.org/packages/centos/6/x86_64/"
+          }
+        }
+      }');
+}
