@@ -58,6 +58,11 @@ bundle agent config(info)
       "host" string => "$(info[host])",
         ifvarclass => isvariable("info[host]");
 
+      "on_boot" string => "true",
+        ifvarclass => not(isvariable("on_boot"));
+      "on_boot" string => "$(info[on_boot])",
+        ifvarclass => isvariable("info[on_boot]");
+
       "context_path" string => "/",
         ifvarclass => not(isvariable("context_path"));
       "context_path" string => "$(info[context_path])",
@@ -491,12 +496,6 @@ bundle agent sonatype_workdir
         "owner": "$(config.nexus_username)",
       }');
 
-      "storagedir" usebundle => file:edit_dir('{
-        "id": "nexus_storagedir",
-        "path": "$(config.sonatype_workdir)/nexus/storage",
-        "owner": "$(config.nexus_username)"
-      }');
-
       "nexus_workdir" usebundle => file:edit_dir('{
         "id": "nexus_workdir",
         "path": "$(config.nexus_workdir)",
@@ -507,6 +506,13 @@ bundle agent sonatype_workdir
       "confdir" usebundle => file:edit_dir('{
         "id": "nexus_confdir",
         "path": "$(config.nexus_confdir)",
+        "owner": "$(config.nexus_username)",
+        "create": "true"
+      }');
+
+      "storagedir" usebundle => file:edit_dir('{
+        "id": "nexus_storagedir",
+        "path": "$(config.sonatype_workdir)/nexus/storage",
         "owner": "$(config.nexus_username)",
         "create": "true"
       }');
@@ -726,14 +732,20 @@ bundle agent security_xml_file
 
 bundle agent service
 {
+  classes:
+      "on_boot" expression => strcmp("$(config.on_boot)", "true");
+    !on_boot::
+      "service_ok" expression => "default:any",
+        scope => "namespace";
+
   services:
-    class:batch_nexus_config_repaired::
+    class:batch_nexus_config_repaired.on_boot::
       "nexus"
         service_policy => "restart",
         service_method => service:chkconfig,
         classes => class:namespace("service");
 
-    class:batch_nexus_config_ok::
+    class:batch_nexus_config_ok.on_boot::
       "nexus"
         service_policy => "start",
         service_method => service:chkconfig,

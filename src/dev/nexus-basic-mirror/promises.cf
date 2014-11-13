@@ -84,6 +84,7 @@ bundle agent nexus
         "host": "nexus.fghijk.local",
         "version": "2.7.2-03",
         "ruby_plugin_version": "1.4.1-1",
+        "on_boot": "false",
         "repositories": {
           "central": {
             "name": "Central",
