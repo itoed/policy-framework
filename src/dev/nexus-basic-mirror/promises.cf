@@ -31,31 +31,23 @@ bundle agent yum
       "tags" slist => { "info=yum" };
 
   vars:
-      "nexus_baseurl" string => "http://nexus.fghijk.net/content/repositories";
-      "nexus_username" string => "admin";
-      "nexus_password" string => "P!55word";
+      "nexus_baseurl" string => "http://192.168.0.103:32681/content/repositories";
 
       "info"                    data => parsejson('{
         "repos": {
           "rpms": {
             "name": "FGHIJK RPM Repository",
             "baseurl": "$(nexus_baseurl)/rpms/",
-            "username": "$(nexus_username)",
-            "password": "$(nexus_password)",
             "skip_if_unavailable": true
           },
           "centos-6": {
             "name": "CentOS Base Mirror",
             "baseurl": "$(nexus_baseurl)/centos-6/",
-            "username": "$(nexus_username)",
-            "password": "$(nexus_password)",
             "skip_if_unavailable": true
           },
           "centos-6-updates": {
             "name": "CentOS Updates Mirror",
             "baseurl": "$(nexus_baseurl)/centos-6-updates/",
-            "username": "$(nexus_username)",
-            "password": "$(nexus_password)",
             "skip_if_unavailable": true
           }
         }
@@ -68,7 +60,7 @@ bundle agent jdk
       "tags" slist => { "info=jdk" };
 
   vars:
-      "info" data => parsejson('{ "version": "1.7.0-55" }');
+      "info" data => parsejson('{ "version": "1.7.0_72-fcs" }');
 }
 
 bundle agent nexus
