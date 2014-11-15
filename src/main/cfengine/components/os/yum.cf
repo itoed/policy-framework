@@ -37,6 +37,11 @@ bundle agent config(info)
       "repodir"             string => "$(info[repodir])",
                         ifvarclass => isvariable("info[repodir]");
 
+      "mirrordir"           string => "/etc/yum.mirrors.d",
+                        ifvarclass => not(isvariable("mirrordir"));
+      "mirrordir"           string => "$(info[mirrordir])",
+                        ifvarclass => isvariable("info[mirrordir]");
+
       "repo_template"       string => "$(inputs:dirs.templatedir)/os/yum/repo.txt";
 
       "repos"                 data => mergedata("info[repos]"),
@@ -87,7 +92,7 @@ bundle agent repo_files
 
   methods:
     yum_parser_ok::
-      "repo_file_$(index)"      usebundle => repo_file("$(repo_argsjson[$(index)])");
+      "yum_repo_$(index)"      usebundle => yum_repo("$(repo_argsjson[$(index)])");
 
   commands:
       "$(parser_module) '$(parser_argsjson)'"
@@ -99,23 +104,44 @@ bundle agent repo_files
       ifvarclass => isvariable("default:yum_parser.errors");
 }
 
-bundle agent repo_file(argsjson)
+bundle agent yum_repo(argsjson)
 {
   vars:
-      "args"                  data => parsejson("$(argsjson)");
-      "repo_id"             string => "$(args[repo_id])";
+      "args" data => parsejson("$(argsjson)");
+      "repo_id" string => "$(args[repo_id])";
 
-      "file_argsjson"       string => format('{
-        "path":             "$(config.repodir)/$(repo_id).repo",
-        "mode":             "644",
-        "owner":            "$(config.owner)",
-        "create":           "true",
-        "template":         "$(config.repo_template)",
-        "template_data":    %S
-      }', "args");
+      "repo_file" string => "$(config.repodir)/$(repo_id).repo";
+      "mirror_file" string => "$(config.mirrordir)/$(repo_id).mirror";
+
+      "extra_args" data => parsejson('{ "mirrorlist_url": "$(mirror_file)" }');
+      "template_data" data => mergedata("args", "extra_args");
+
+      "repo_file_argsjson" string => format('{
+        "path": "$(repo_file)",
+        "mode": "644",
+        "owner": "$(config.owner)",
+        "create": "true",
+        "template": "$(config.repo_template)",
+        "template_data": %S
+      }', "template_data");
+
+    has_mirrorlist::
+      "mirror_file_argsjson" string => format('{
+        "path": "$(mirror_file)"
+        "mode": "644",
+        "owner": "$(config.owner)",
+        "create": "true",
+        "contents": %S
+      }', "template_data[mirrorlist]");
+
+  classes:
+      "has_mirrorlist" expression => strcmp("$(template_data[has_mirrorlist])", "true");
 
   methods:
-      "edit_file"         usebundle => file:edit_file("$(file_argsjson)"),
+      "edit_repo_file"    usebundle => file:edit_file("$(repo_file_argsjson)"),
+                          useresult => "edit_file";
+    has_mirrorlist::
+      "edit_mirror_file"  usebundle => file:edit_file("$(mirror_file_argsjson)"),
                           useresult => "edit_file";
 }
 

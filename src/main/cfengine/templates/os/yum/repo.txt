@@ -6,7 +6,12 @@ gpgcheck=0
 autorefresh=1
 type=rpm-md
 name={{name}}
+{{#has_mirrorlist}}
+mirrorlist={{mirrorlist_url}}
+{{/has_mirrorlist}}
+{{#has_baseurl}}
 baseurl={{baseurl}}
+{{/has_baseurl}}
 {{#credentials}}
 username={{username}}
 password={{password}}

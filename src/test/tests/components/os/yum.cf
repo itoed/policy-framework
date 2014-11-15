@@ -63,3 +63,64 @@ bundle agent B1_repoFiles_nameAndBaseUrl_fileCreated
       "assert"          usebundle => assert_file_perms("644",
                                         "$(knowledge.tmp_dir)/test.repo");
 }
+
+bundle agent B2_repoFiles_missingBothBaseurlAndMirrorlist_error
+{
+  meta:
+      "tags" slist => { "test" };
+
+  vars:
+      "info" data => parsejson('{
+        "repos": {
+          "test": {
+            "name": "Test Repo"
+          }
+        }
+      }');
+
+  methods:
+      "config" usebundle => yum:config(@(info));
+      "validate" usebundle => yum:validate;
+      "repo_files" usebundle => yum:repo_files;
+
+      "assert_yum_parser_error" usebundle => assert_class("yum:yum_parser_error");
+}
+
+bundle agent B3_repoFiles_mirrorlist_bothCreated
+{
+  meta:
+      "tags" slist => { "test", "tmpdir" };
+
+  vars:
+      "repodir" string => "$(knowledge.tmp_dir)/yum.repos.d";
+      "mirrordir" string => "$(knowledge.tmp_dir)/yum.mirrors.d";
+
+      "info" data => parsejson('{
+        "repodir": "$(repodir)",
+        "mirrordir": "$(mirrordir)",
+        "owner": "$(knowledge.env_user)",
+        "repos": {
+          "test": {
+            "name": "Test Repo"
+            "mirrorlist": [
+              "http://localhost",
+              "http://foreignhost"
+            ]
+          }
+        }
+      }');
+
+  files:
+      "$(repodir)/." create => "true";
+      "$(mirrordir)/." create => "true";
+
+  methods:
+      "config" usebundle => yum:config(@(info));
+      "validate" usebundle => yum:validate;
+      "repo_files" usebundle => yum:repo_files;
+
+      "assert_repo_file" usebundle =>
+        assert_file_perms("644", "$(repodir)/test.repo");
+      "assert_mirror_file" usebundle =>
+        assert_file_perms("644", "$(mirrordir)/test.mirror");
+}

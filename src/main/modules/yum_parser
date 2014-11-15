@@ -10,6 +10,7 @@ class YumRepository(object):
         self.repo_id = repo_id
         self.name = None
         self.baseurl = None
+        self.mirrorlist = None
         self.username = None
         self.password = None
         self.skip_if_unavailable = False
@@ -19,7 +20,11 @@ class YumRepository(object):
         data = {}
         data["repo_id"] = self.repo_id
         data["name"] = self.name
+        data["has_baseurl"] = self.baseurl != None
         data["baseurl"] = self.baseurl
+        data["has_mirrorlist"] = self.mirrorlist != None
+        data["mirrorlist"] = self.mirrorlist
+        data["mirrorlist_url"] = "TO BE DETERMINED"
         data["skip_if_unavailable"] = self.skip_if_unavailable
         if self.username and self.password:
             data["credentials"] = {}
@@ -77,13 +82,16 @@ class ArgumentParser(object):
                 else:
                     repo.name = name_arg
 
-            # Parse baseurl
-            if "baseurl" not in repo_arg:
+            # Ensure exactly one of baseurl and mirrorlist are present
+            if ("baseurl" not in repo_arg and "mirrorlist" not in repo_arg
+                    ) or ("baseurl" in repo_arg and "mirrorlist" in repo_arg):
                 repo_error = True
                 self.errors.append(
-                    ("Yum repository object '{0}' expects key 'baseurl'"
-                    ).format(repo_id))
-            else:
+                    ("Yum repository object '{0}' expects key 'baseurl' "
+                     "or key 'mirrorlist'").format(repo_id))
+
+            # Parse baseurl
+            if "baseurl" in repo_arg:
                 baseurl_arg = repo_arg["baseurl"]
                 if not isinstance(baseurl_arg, basestring):
                     repo_error = True
@@ -93,6 +101,18 @@ class ArgumentParser(object):
                         ).format(repo_id, json.dumps(baseurl_arg)))
                 else:
                     repo.baseurl = baseurl_arg
+
+            # Parse mirrorlist
+            if "mirrorlist" in repo_arg:
+                mirrorlist_arg = repo_arg["mirrorlist"]
+                if type(mirrorlist_arg) != list:
+                    repo_error = True
+                    self.errors.append(
+                        ("Yum repository object '{0}' expects key "
+                         "'mirrorlist' to be a list but received '{1}'"
+                        ).format(repo_id, json.dumps(mirrorlist_arg)))
+                else:
+                    repo.mirrorlist = mirrorlist_arg
 
             # Parse username
             if "username" in repo_arg:
