@@ -31,7 +31,7 @@ bundle common knowledge
 
       "empty_file"    string => "$(mocks_dir)/files/empty-file";
 
-      "inputs"        string => "$(workdir)/masterfiles/inputs.cf";
+      "inputs"        string => "$(workdir)/main/cfengine/inputs.cf";
 }
 
 bundle agent find_test_bundles
@@ -573,5 +573,6 @@ bundle common basedirs
 {
   vars:
       "workdir"         string => "$(test:knowledge.workdir)";
-      "inputdir"        string => "$(test:knowledge.workdir)/masterfiles";
+      "inputdir"        string => "$(test:knowledge.workdir)/main/cfengine";
+      "moduledir"       string => "$(test:knowledge.workdir)/main/modules";
 }

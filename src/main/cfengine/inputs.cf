@@ -16,7 +16,11 @@ bundle common dirs
       "inputdir"                  string => "$(sys.inputdir)",
                               ifvarclass => not(isvariable("inputdir"));
 
-      "moduledir"                 string => "$(workdir)/modules";
+      "moduledir"                 string => "$(basedirs.moduledir)",
+                              ifvarclass => isvariable("inputs:basedirs.moduledir");
+      "moduledir"                 string => "$(workdir)/modules",
+                              ifvarclass => not(isvariable("moduledir"));
+
       "libdir"                    string => "$(inputdir)/lib/3.6";
       "componentdir"              string => "$(inputdir)/components";
       "templatedir"               string => "$(inputdir)/templates";
