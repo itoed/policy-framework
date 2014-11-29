@@ -10,23 +10,12 @@ body file control
                 "$(inputs:components.common[package])",
                 "$(inputs:components.common[service])",
                 "$(inputs:components.common[user])",
-                "$(inputs:components.os[hosts])",
-                "$(inputs:components.os[iptables])",
-                "$(inputs:components.os[network])",
-                "$(inputs:components.os[yum])",
                };
 }
 
 bundle common knowledge
 {
   vars:
-      "dependencies" slist => {
-                                "network",
-                                "hosts",
-                                "iptables",
-                                "yum",
-                               }, meta => { "dependencies" };
-
       "owner"               string => "root";
       "homedir"             string => "/etc/nginx";
 

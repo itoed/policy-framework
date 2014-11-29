@@ -15,7 +15,6 @@ body file control
                 "$(inputs:components.apps[py_bcrypt])",
                 "$(inputs:components.daemons[mysql])",
                 "$(inputs:components.daemons[redis])",
-                "$(inputs:components.os[hosts])",
                 "$(inputs:components.os[iptables])",
                 "$(inputs:components.os[network])",
                 "$(inputs:components.os[swap])",
@@ -29,7 +28,6 @@ bundle common knowledge
   vars:
       "dependencies"       slist => {
                                       "network",
-                                      "hosts",
                                       "iptables",
                                       "swap",
                                       "yum",

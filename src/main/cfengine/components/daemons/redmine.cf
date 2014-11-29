@@ -14,7 +14,6 @@ body file control
               "$(inputs:components.apps[gem])",
               "$(inputs:components.daemons[mysql])",
               "$(inputs:components.libs[openssl])",
-              "$(inputs:components.os[hosts])",
               "$(inputs:components.os[iptables])",
               "$(inputs:components.os[network])",
               "$(inputs:components.os[yum])",
@@ -27,7 +26,6 @@ bundle common knowledge
   vars:
       "dependencies" slist => {
         "network",
-        "hosts",
         "iptables",
         "yum",
         "openssl",
