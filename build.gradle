@@ -11,8 +11,6 @@ version = '0.0.1'
 
 ext {
     buildEnv = project.hasProperty('env') ? project.property('env') : null
-    mainDir = "$rootDir/src/main"
-    artifactDir = "$buildDir/artifact"
     artifactRemoteUrl = rootDir
     artifactRemoteRef = 'refs/heads/build'
     projectGit = new GitRepository()
@@ -24,39 +22,24 @@ task clean(type: Delete) {
     delete buildDir
 }
 
-// When a file that has been copied to artifactDir is deleted at its source,
-// this task ensures it will be deleted in the artifactDir
-task cleanArtifactDir(type: Delete) {
-  delete artifactDir
-}
-
-task copyResources(type: Copy) {
-    outputs.upToDateWhen { false }
-    dependsOn cleanArtifactDir
-    from("$mainDir/resources") {
+task syncSrcDir(type: Sync) {
+    from('src/main/resources') {
         include 'gitignore.txt'
         rename 'gitignore.txt', '.gitignore'
     }
-    into artifactDir
-}
-
-task copyMasterfiles(type: Copy) {
-    dependsOn cleanArtifactDir
-    from "$mainDir/cfengine"
-    exclude '**/*.swp'
-    into "$artifactDir/masterfiles"
-}
-
-task copyModules(type: Copy) {
-    dependsOn cleanArtifactDir
-    from "$mainDir/modules"
-    exclude '**/*.swp'
-    exclude '**/*.pyc'
-    into "$artifactDir/modules"
+    from('src/main/cfengine') {
+        into 'masterfiles'
+    }
+    from('src/main/modules') {
+        into 'modules'
+    }
+    into 'build/artifact'
 }
 
 task build {
-    dependsOn copyResources, copyMasterfiles, copyModules
+    group 'Build'
+    description 'Builds the project artifacts'
+    dependsOn syncSrcDir
 }
 
 /*
@@ -68,7 +51,7 @@ def gitRepository = new GitRepository()
 task gitInitArtifactBuild (type: GitInit) {
     dependsOn build
     git = gitRepository
-    dirname = artifactDir
+    dirname = 'build/artifact'
 }
 
 task gitFetchArtifactBuild (type: GitFetch) {

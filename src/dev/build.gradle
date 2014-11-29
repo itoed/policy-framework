@@ -24,14 +24,13 @@ dockerContainers {
 dockerContainers.each { container ->
     task "devSync${container.label}" (type: Copy) {
         dependsOn build
-        group 'development'
-        from("$artifactDir/masterfiles") {
+        from("build/artifact/masterfiles") {
             into 'masterfiles'
         }
         from(container.srcDir) {
             into 'masterfiles'
         }
-        from("$artifactDir/modules") {
+        from("build/artifact/modules") {
             into 'modules'
         }
         into "build/dev/${container.basedir}"
@@ -56,6 +55,8 @@ dockerContainers.each { container ->
     }
 
     task "devDockerExecCfagent${container.label}" {
+        group 'Development'
+        description "Executes cf-agent on ${container.label}"
         dependsOn "devDockerStartContainer${container.label}"
         doLast { container.execCfagent([ '-KD', 'policy_debug_mode' ]) }
     }
@@ -70,6 +71,12 @@ dockerContainers.each { container ->
         outputs.upToDateWhen { !container.exists() }
         doLast { container.remove() }
     }
+}
+
+task devDockerRemoveContainers {
+    dependsOn dockerContainers.collect { "devDockerRemoveContainer${it.label}" }
+    group 'Development'
+    description "Removes all docker containers"
 }
 
 clean.dependsOn dockerContainers.findAll { it.running }
