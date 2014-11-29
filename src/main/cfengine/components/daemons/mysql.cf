@@ -30,7 +30,16 @@ body file control
                 "$(inputs:components.common[class])",
                 "$(inputs:components.common[file])",
                 "$(inputs:components.common[package])",
+                "$(inputs:components.os[yum])",
                };
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+        "yum",
+      }, meta => { "dependencies" };
 }
 
 #
@@ -226,11 +235,9 @@ bundle agent secure_installation
     secure_installation_repaired::
       "MySQL secure installation was repaired";
 
-    default:any::
+    secure_installation_error::
       "ERROR: $(default:mysql_secure_installation.errors)"
       ifvarclass => isvariable("default:mysql_secure_installation.errors");
-
-    secure_installation_error::
       "ERROR: MySQL secure installation could not be repaired";
 }
 

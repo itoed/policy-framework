@@ -1,0 +1,101 @@
+# PROMISES
+#
+
+body common control
+{
+  inputs => {
+              "inputs.cf",
+              "setup.cf",
+              "$(inputs:components.daemons[mysql])",
+            };
+  bundlesequence  => { "main" };
+}
+
+bundle agent main
+{
+  methods:
+      "run" usebundle => setup:run;
+}
+
+bundle common knowledge
+{
+  vars:
+      "dependencies" slist => {
+        "mysql",
+      }, meta => { "dependencies" };
+}
+
+bundle agent yum
+{
+  meta:
+      "tags" slist => { "info=yum" };
+
+  vars:
+      "nexus_baseurl" string => "http://192.168.0.103:32681/content/repositories";
+
+      "info" data => parsejson('{
+        "repos": {
+          "centos-6": {
+            "name": "CentOS Base Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6/",
+            "skip_if_unavailable": true
+          },
+          "centos-6-updates": {
+            "name": "CentOS Updates Mirror",
+            "baseurl": "$(nexus_baseurl)/centos-6-updates/",
+            "skip_if_unavailable": true
+          },
+          "mysql": {
+            "name": "MySQL 5.6 Community Server Mirror",
+            "baseurl": "$(nexus_baseurl)/mysql56-community/",
+            "skip_if_unavailable": true
+          },
+          "epel": {
+            "name": "EPEL",
+            "baseurl": "$(nexus_baseurl)/epel/",
+            "skip_if_unavailable": true
+          }
+        }
+      }');
+}
+
+bundle agent mysql
+{
+  meta:
+      "tags" slist => { "info=mysql" };
+
+  vars:
+      "info" data => parsejson('{
+        "root_password": "P@55word",
+        "users": {
+          "git@localhost": {
+            "password": "P@55word",
+            "privileges": {
+              "gitlabhq_production": [
+                "SELECT", "LOCK TABLES", "INSERT", "UPDATE",
+                "DELETE", "CREATE", "DROP", "INDEX", "ALTER"
+              ]
+            }
+          },
+          "redmine@localhost": {
+            "password": "P@55word",
+            "privileges": {
+              "redmine": [
+                "SELECT", "LOCK TABLES", "INSERT", "UPDATE",
+                "DELETE", "CREATE", "DROP", "INDEX", "ALTER"
+              ]
+            }
+          }
+        },
+        "databases": {
+          "gitlabhq_production": {
+            "default_character_set": "utf8",
+            "collate": "utf8_unicode_ci"
+          },
+          "redmine": {
+            "default_character_set": "utf8",
+            "collate": "utf8_unicode_ci"
+          }
+        }
+      }');
+}
