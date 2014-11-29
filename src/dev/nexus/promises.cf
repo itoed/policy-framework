@@ -192,7 +192,7 @@ bundle agent nexus
           },
           "epel": {
             "name": "EPEL",
-            "remote_url": "http://mirror.csclub.uwaterloo.ca/fedora/epel/6Server/x86_64/"
+            "remote_url": "http://fedora-epel.mirror.iweb.com/6Server/x86_64/"
           },
           "puias": {
             "name": "PUIAS",
