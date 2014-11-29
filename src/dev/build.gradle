@@ -1,0 +1,169 @@
+extensions.dockerContainers = project.container(DockerContainer,
+    new NamedDomainObjectFactory<DockerContainer>() {
+        @Override
+        DockerContainer create(String name) {
+            def container = new DockerContainer(name)
+            container.image = 'fghijk/cfengine_dev'
+            container.buildDir = buildDir
+            container
+        }
+    })
+
+dockerContainers {
+    mysql {
+        port = '33306:3306'
+    }
+    nexus {
+        port = '38081:8081'
+    }
+    nexusBasicMirror {
+        port = '38082:8081'
+    }
+}
+
+dockerContainers.each { container ->
+    task "devSync${container.label}" (type: Copy) {
+        dependsOn build
+        group 'development'
+        from("$artifactDir/masterfiles") {
+            into 'masterfiles'
+        }
+        from(container.srcDir) {
+            into 'masterfiles'
+        }
+        from("$artifactDir/modules") {
+            into 'modules'
+        }
+        into "build/dev/${container.basedir}"
+    }
+
+    task "devSelinuxChangeContext${container.label}" (type: Exec) {
+        dependsOn "devSync${container.label}"
+        commandLine 'chcon', '-Rt', 'svirt_sandbox_file_t',
+            "build/dev/${container.basedir}"
+    }
+
+    task "devDockerCreateContainer${container.label}" {
+        dependsOn "devSelinuxChangeContext${container.label}"
+        outputs.upToDateWhen { container.exists() }
+        doLast { container.create() }
+    }
+
+    task "devDockerStartContainer${container.label}" {
+        dependsOn "devDockerCreateContainer${container.label}"
+        outputs.upToDateWhen { container.running }
+        doLast { container.start() }
+    }
+
+    task "devDockerExecCfagent${container.label}" {
+        dependsOn "devDockerStartContainer${container.label}"
+        doLast { container.execCfagent([ '-KD', 'policy_debug_mode' ]) }
+    }
+
+    task "devDockerStopContainer${container.label}" {
+        outputs.upToDateWhen { !container.running }
+        doLast { container.stop() }
+    }
+
+    task "devDockerRemoveContainer${container.label}" {
+        dependsOn "devDockerStopContainer${container.label}"
+        outputs.upToDateWhen { !container.exists() }
+        doLast { container.remove() }
+    }
+}
+
+clean.dependsOn dockerContainers.findAll { it.running }
+    .collect { "devDockerRemoveContainer${it.label}" }
+
+class DockerContainer {
+    final String name
+    String port
+    String image
+    String buildDir
+
+    DockerContainer(String name) {
+        this.name = name
+    }
+
+    String getSrcDir() {
+        'src/dev/' + GUtil.toWords(name, '-' as char)
+    }
+
+    String getLabel() {
+        GUtil.toCamelCase(name)
+    }
+
+    String getBasedir() {
+        GUtil.toWords(name, '-' as char)
+    }
+
+    String getDockerName() {
+        'dev_policy_framework_' + GUtil.toWords(name, '_' as char)
+    }
+
+    boolean exists() {
+        def cmd = 'docker ps -a --no-trunc'
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd -> ${proc.err.text}"
+        def lines = proc.in.readLines()
+        assert !lines.empty, "ERROR: $cmd -> ${proc.err.text}"
+        lines.size() > 1 && lines[1..-1].any {
+            it.tokenize(' ').last() == dockerName
+        }
+    }
+
+    void create() {
+        if (exists()) { return }
+        def cmd = [ 'docker', 'create', '-ti', '--name', dockerName, '-p', port,
+          '-v', "$buildDir/dev/$basedir/masterfiles:/var/cfengine/inputs:ro",
+          '-v', "$buildDir/dev/$basedir/modules:/var/cfengine/modules:ro",
+          image, 'bash' ]
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd -> ${proc.err.text}"
+    }
+
+    boolean isRunning() {
+        if (!exists()) { return false }
+        def cmd = [ 'docker', 'inspect', '--format', '{{.State.Running}}', dockerName ]
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd -> ${proc.err.text}"
+        proc.text.trim() == 'true'
+    }
+
+    void start() {
+        if (running) { return }
+        def cmd = [ 'docker', 'start', dockerName ]
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd (${proc.text.err})"
+    }
+
+    void execCfagent(String inputFile = '', List<String> options) {
+        def cmd = [ 'docker', 'exec', dockerName, 'cf-agent' ] + options +
+            (inputFile ? [ '-f', inputFile ] : [])
+        println "Executing ${cmd.join(' ')}"
+        def proc = cmd.execute()
+        proc.consumeProcessOutput(System.out, System.err)
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd"
+    }
+
+    void stop() {
+        if (!running) { return }
+        def cmd = [ 'docker', 'stop', dockerName ]
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd (${proc.text.err})"
+    }
+
+    void remove() {
+        if (!exists()) { return }
+        def cmd = [ 'docker', 'rm', dockerName ]
+        def proc = cmd.execute()
+        proc.waitFor()
+        assert proc.exitValue() == 0, "ERROR: $cmd (${proc.text.err})"
+    }
+}

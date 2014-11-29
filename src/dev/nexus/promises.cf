@@ -31,9 +31,9 @@ bundle agent yum
       "tags" slist => { "info=yum" };
 
   vars:
-      "nexus_baseurl" string => "http://nexus.fghijk.net/content/repositories";
-      "nexus_username" string => "admin";
-      "nexus_password" string => "P!55word";
+      "nexus_baseurl" string => "http://192.168.0.103:32681/content/repositories";
+      "nexus_username" string => "";
+      "nexus_password" string => "";
 
       "info"                    data => parsejson('{
         "repos": {

@@ -10,12 +10,9 @@ buildscript {
 version = '0.0.1'
 
 ext {
+    buildEnv = project.hasProperty('env') ? project.property('env') : null
     mainDir = "$rootDir/src/main"
-    devDir = "$rootDir/src/dev"
-    dockerImage = 'fghijk/cfengine_dev'
-    dockerContainer = 'policy_framework_dev'
     artifactDir = "$buildDir/artifact"
-    dockerDir = "$buildDir/docker"
     artifactRemoteUrl = rootDir
     artifactRemoteRef = 'refs/heads/build'
     projectGit = new GitRepository()
@@ -60,67 +57,6 @@ task copyModules(type: Copy) {
 
 task build {
     dependsOn copyResources, copyMasterfiles, copyModules
-}
-
-file(devDir).eachDir { dir ->
-    def label = GUtil.toCamelCase(dir.name)
-
-    task "devCopy$label" (type: Copy) {
-      dependsOn build
-      group 'development'
-      from dir
-      into "$artifactDir/masterfiles"
-    }
-}
-
-// Files are synced in this directory so that docker volumes within
-// don't require to be remounted as often as the artifact directory is cleaned
-task syncDockerDir(type: Sync) {
-    from artifactDir
-    into dockerDir
-}
-
-task selinuxChangeContext(type: Exec) {
-    dependsOn syncDockerDir
-    commandLine 'chcon', '-Rt', 'svirt_sandbox_file_t', dockerDir
-}
-
-task dockerCreateContainer(type: Exec) {
-    dependsOn selinuxChangeContext
-    executable 'docker'
-    args = [ 'create', '-ti', '--name', dockerContainer,
-        '-p', '38081:8081',
-        '-v', "$dockerDir/masterfiles:/root/masterfiles:ro",
-        '-v', "$dockerDir/modules:/root/modules:ro",
-        dockerImage, 'bash' ]
-}
-
-task dockerStopContainer(type: Exec) {
-    executable 'docker'
-    args = [ 'stop', dockerContainer ]
-}
-
-task dockerRemoveContainer(type: Exec) {
-    dependsOn dockerStopContainer
-    executable 'docker'
-    args = [ 'rm',dockerContainer ] 
-}
-
-task dockerStartContainer(type: Exec) {
-    executable 'docker'
-    args = [ 'start', '-i', dockerContainer ]
-}
-
-task dockerExecCfagentUpdate(type: Exec) {
-    dependsOn syncDockerDir
-    executable 'docker'
-    args = [ 'exec', dockerContainer, 'cf-agent', '-Kf', '/root/update.cf' ]
-}
-
-task dockerExecCfagent(type: Exec) {
-    dependsOn dockerExecCfagentUpdate
-    executable 'docker'
-    args = [ 'exec', dockerContainer, 'cf-agent', '-KD', 'policy_debug_mode' ]
 }
 
 /*
@@ -544,4 +480,8 @@ def nextVersion() {
         VersionNumber.parse(versionTags.last().name.substring(1))
 
     "${latestVersion.major}.${latestVersion.minor}.${latestVersion.micro + 1}-SNAPSHOT"
+}
+
+if (buildEnv == 'dev') {
+    apply from: 'src/dev/build.gradle'
 }
