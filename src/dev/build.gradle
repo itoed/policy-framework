@@ -26,11 +26,11 @@ dockerContainers.each { container ->
         dependsOn build
         from("build/artifact/masterfiles") {
             fileMode 0644
-            into 'masterfiles'
+            into 'inputs'
         }
         from(container.srcDir) {
             fileMode 0644
-            into 'masterfiles'
+            into 'inputs'
         }
         from("build/artifact/modules") {
             into 'modules'
@@ -125,7 +125,7 @@ class DockerContainer {
     void create() {
         if (exists()) { return }
         def cmd = [ 'docker', 'create', '-ti', '--name', dockerName, '-p', port,
-          '-v', "$buildDir/dev/$basedir/masterfiles:/var/cfengine/inputs:ro",
+          '-v', "$buildDir/dev/$basedir/inputs:/var/cfengine/inputs:ro",
           '-v', "$buildDir/dev/$basedir/modules:/var/cfengine/modules:ro",
           image, 'bash' ]
         def proc = cmd.execute()
