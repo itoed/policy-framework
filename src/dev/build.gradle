@@ -25,9 +25,11 @@ dockerContainers.each { container ->
     task "devSync${container.label}" (type: Copy) {
         dependsOn build
         from("build/artifact/masterfiles") {
+            fileMode 0644
             into 'masterfiles'
         }
         from(container.srcDir) {
+            fileMode 0644
             into 'masterfiles'
         }
         from("build/artifact/modules") {
