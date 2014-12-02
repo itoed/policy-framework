@@ -26,7 +26,6 @@ body file control
                 "$(inputs:components.apps[python_lxml])",
                 "$(inputs:components.apps[rpmbuild])",
                 "$(inputs:components.apps[ssh])",
-                "$(inputs:components.os[hosts])",
                 "$(inputs:components.os[iptables])",
                 "$(inputs:components.os[network])",
                 "$(inputs:components.os[swap])",
@@ -40,7 +39,6 @@ bundle common knowledge
   vars:
       "dependencies" slist => {
           "network",
-          "hosts",
           "iptables",
           "swap",
           "yum",
@@ -211,7 +209,7 @@ bundle agent control
     kept.default:policy_debug_mode::
       "Jenkins is as promised";
     repaired::
-      "Jenkins was repaired";
+      "* Jenkins was repaired";
     error::
       "ERROR: Jenkins could not be repaired";
 }

@@ -109,7 +109,7 @@ try:
 
     password = sys.argv[1]
 
-    if mysqld_status() == STATUS_STOPPED:
+    if mysqld_status() != STATUS_RUNNING:
         mysqld_start()
 
     #
@@ -331,6 +331,10 @@ elif root_password_reset:
     repairs.append("Root password did not exist and was set")
 if repairs:
     print("%repairs=" + json.dumps(repairs))
+
+outputs = outlog.read()
+if outputs:
+    print("%outputs=" + json.dumps([ outputs.rstrip() ]))
 
 errors = errlog.read()
 if errors:

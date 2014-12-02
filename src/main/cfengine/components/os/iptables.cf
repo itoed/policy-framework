@@ -129,13 +129,13 @@ bundle agent service
 {
   commands:
     iptables_file_repaired::
-      "$(config.iptables_initd) restart"
-      classes => class:local("restart"),
+      "$(config.iptables_initd) save"
+      classes => class:local("save"),
       contain => default:silent;
 
   reports:
-    restart_repaired::
-      "* Iptables service was restarted";
-    restart_error::
-      "ERROR: Iptables service could not be restarted";
+    save_repaired::
+      "* Iptables rules were saved";
+    save_error::
+      "ERROR: Iptables rules could not be saved";
 }

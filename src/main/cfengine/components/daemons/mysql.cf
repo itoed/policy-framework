@@ -236,6 +236,7 @@ bundle agent secure_installation
       "MySQL secure installation was repaired";
 
     secure_installation_error::
+      "NOTICE: $(default:mysql_secure_installation.outputs)";
       "ERROR: $(default:mysql_secure_installation.errors)"
       ifvarclass => isvariable("default:mysql_secure_installation.errors");
       "ERROR: MySQL secure installation could not be repaired";
