@@ -11,8 +11,8 @@ version = '0.0.1'
 
 ext {
     buildEnv = project.hasProperty('env') ? project.property('env') : null
-    artifactRemoteUrl = rootDir
-    artifactRemoteRef = 'refs/heads/build'
+    artifactRemoteUrl = project.property('net.fghijk.cfengine.policyFramework.releases.url')
+    artifactRemoteRef = 'refs/heads/master'
     projectGit = new GitRepository()
 }
 
@@ -88,6 +88,18 @@ task gitPushArtifactBuild (type: GitPush) {
     repository = artifactRemoteUrl
     srcRef = 'refs/heads/master'
     dstRef = artifactRemoteRef
+}
+
+/* This task can be called locally for convenience.
+ * Since sensitive information should only be in in the
+ * policy hub, this task can also be called from Jenkins.
+ * Jenkins needs to test the policy framework, commit the build,
+ * and push it to where consumers will be provided access.
+ *
+ */
+task publish(dependsOn: gitPushArtifactBuild) {
+    group 'Publish'
+    description 'Commits and pushes the build repository'
 }
 
 /*
