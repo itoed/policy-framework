@@ -294,6 +294,9 @@ class GitRepository {
      * @return
      */
     Iterable<String> diff(Map options = [ cached: false ]) {
+        if (!getRefId('HEAD')) {
+            return []
+        }
         def entries = git.diff().setCached(options.cached).call()
         if (!options.cached) {
             entries = entries.findAll { it.changeType != DiffEntry.ChangeType.ADD }
